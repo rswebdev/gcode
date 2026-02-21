@@ -887,31 +887,36 @@ function _rebuildLandscape(allFrames, isLive) {
   if (!allFrames || allFrames.length === 0) return;
 
   const F        = allFrames.length;
+  const N        = _toMono(allFrames[0]).length;
   const zSpacing = SCENE_DEPTH / Math.max(cfg.maxFrames - 1, 1);
   const FLOOR_Y  = -10;
   const SUB      = 64;   // subsampled vertices for fill polygon (performance)
 
-  // Render oldest frame first (highest Z), so nearest frames occlude those behind.
+  // Pre-compute Y values — shared by fill/line pass and perpendicular pass.
+  const yValues = [];
   for (let fi = 0; fi < F; fi++) {
     const data = _toMono(allFrames[fi]);
-    const N    = data.length;
-    const z    = fi * zSpacing;
+    const ys   = new Float32Array(N);
+    for (let i = 0; i < N; i++) ys[i] = data[i] * 4 * cfg.ampScale;
+    yValues.push(ys);
+  }
 
-    // ---- Fill polygon ----
-    // Shape: bottom-left → wave profile → bottom-right (auto-closes)
-    const shape = new THREE.Shape();
-    shape.moveTo(-SCENE_W / 2, FLOOR_Y);
+  // ---- HORIZONTAL PASS: fill polygon + wave stroke per frame ----
+  // Oldest frame first (back-to-front) so nearer fills occlude geometry behind.
+  for (let fi = 0; fi < F; fi++) {
+    const ys = yValues[fi];
+    const z  = fi * zSpacing;
 
+    // Fill polygon: bottom-left → wave crest (subsampled) → bottom-right
+    const sh = new THREE.Shape();
+    sh.moveTo(-SCENE_W / 2, FLOOR_Y);
     for (let s = 0; s < SUB; s++) {
       const si = Math.floor(s * (N - 1) / (SUB - 1));
-      const x  = (si / (N - 1)) * SCENE_W - SCENE_W / 2;
-      const y  = data[si] * 4 * cfg.ampScale;
-      shape.lineTo(x, y);
+      sh.lineTo((si / (N - 1)) * SCENE_W - SCENE_W / 2, ys[si]);
     }
+    sh.lineTo(SCENE_W / 2, FLOOR_Y);
 
-    shape.lineTo(SCENE_W / 2, FLOOR_Y);
-
-    const fillGeo = new THREE.ShapeGeometry(shape);
+    const fillGeo = new THREE.ShapeGeometry(sh);
     const fillMat = new THREE.MeshBasicMaterial({
       color:               0x0a0a0a,
       polygonOffset:       true,
@@ -924,17 +929,54 @@ function _rebuildLandscape(allFrames, isLive) {
     waveLines.push(mesh);
     scene.add(mesh);
 
-    // ---- Wave stroke ----
+    // Wave stroke (full resolution) on top of fill
     const pos = new Float32Array(N * 3);
     for (let i = 0; i < N; i++) {
       pos[i * 3]     = (i / (N - 1)) * SCENE_W - SCENE_W / 2;
-      pos[i * 3 + 1] = data[i] * 4 * cfg.ampScale;
+      pos[i * 3 + 1] = ys[i];
       pos[i * 3 + 2] = z;
     }
     const line = _makeLine(pos, fi, isLive);
     waveLines.push(line);
     scene.add(line);
   }
+
+  // ---- PERPENDICULAR PASS: cross-sections along Z, horizon-masked per column ----
+  const N_STEP = Math.max(4, Math.min(64, Math.round(N / Math.max(F, 4))));
+
+  for (let si = 0; si < N; si += N_STEP) {
+    const x = (si / (N - 1)) * SCENE_W - SCENE_W / 2;
+    let colHorizon = -1000;
+    let segPts     = null;
+
+    // Walk newest→oldest so nearer crests set the horizon for farther frames.
+    for (let fi = F - 1; fi >= 0; fi--) {
+      const y = yValues[fi][si];
+      const z = fi * zSpacing;
+
+      if (y > colHorizon) {
+        if (!segPts) segPts = [];
+        segPts.push(x, y, z);
+        colHorizon = y;
+      } else {
+        if (segPts && segPts.length >= 6) _emitLandscapePerp(segPts, isLive);
+        segPts = null;
+      }
+    }
+    if (segPts && segPts.length >= 6) _emitLandscapePerp(segPts, isLive);
+  }
+}
+
+/** Emit one perpendicular landscape segment (dimmer, cooler than horizontal lines). */
+function _emitLandscapePerp(pts, isLive) {
+  const pos = new Float32Array(pts);
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  const color = isLive ? new THREE.Color(0xffffff) : new THREE.Color(0x5599cc);
+  const mat   = new THREE.LineBasicMaterial({ color, transparent: true, opacity: isLive ? 0.3 : 0.4 });
+  const line  = new THREE.Line(geo, mat);
+  waveLines.push(line);
+  scene.add(line);
 }
 
 /**
