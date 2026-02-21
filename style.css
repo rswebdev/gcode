@@ -142,3 +142,71 @@ select:focus,
 input[type="number"]:focus {
   border-color: #00d4ff44;
 }
+
+/* Noise generator controls */
+.hidden {
+  display: none !important;
+}
+
+#controls-noise {
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  border-left: 1px solid #1a3a1a;
+  padding-left: 16px;
+}
+
+#controls-noise label {
+  display: flex;
+  flex-direction: column;
+  font-size: 0.68em;
+  gap: 3px;
+  color: #5a8a5a;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+#controls-noise select {
+  min-width: 120px;
+}
+
+#controls-noise input[type="number"] {
+  width: 72px;
+}
+
+input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 90px;
+  height: 3px;
+  background: #1a3a1a;
+  border: none;
+  outline: none;
+  cursor: pointer;
+}
+
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 10px;
+  height: 10px;
+  background: #44bb44;
+  border-radius: 50%;
+  cursor: pointer;
+}
+
+input[type="range"]::-moz-range-thumb {
+  width: 10px;
+  height: 10px;
+  background: #44bb44;
+  border: none;
+  border-radius: 50%;
+  cursor: pointer;
+}
+
+output {
+  color: #44bb44;
+  font-size: 0.95em;
+  min-width: 36px;
+}
