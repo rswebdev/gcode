@@ -13,6 +13,7 @@
  *   epicycles   — DFT epicycle arm snapshot per frame, layered in Z
  *   chladni     — Chladni nodal pattern zero-crossings driven by dominant frequency
  *   moire       — two offset concentric ring families per frame
+ *   landscape   — Joy Division occlusion ridges with opaque fill polygons
  */
 
 import * as THREE from 'three';
@@ -51,7 +52,7 @@ let cfg       = { ampScale: 2.0, maxFrames: 64 };
 // a new frame is added. Per-frame shapes append one (or more) lines.
 // ---------------------------------------------------------------------------
 export const REBUILD_ALL_SHAPES = new Set([
-  'spiral', 'phyllotaxis', 'tube', 'flowfield', 'terrain', 'harmonograph', 'chladni',
+  'spiral', 'phyllotaxis', 'tube', 'flowfield', 'terrain', 'harmonograph', 'chladni', 'landscape',
 ]);
 
 // ---------------------------------------------------------------------------
@@ -88,7 +89,7 @@ export function init(canvas, config) {
 
 /**
  * Switch rendering shape. Clears all existing lines and repositions camera.
- * @param {'linear'|'circular'|'spiral'|'lissajous'|'phyllotaxis'|'tube'|'terrain'|'harmonograph'|'flowfield'|'epicycles'|'chladni'|'moire'} newShape
+ * @param {'linear'|'circular'|'spiral'|'lissajous'|'phyllotaxis'|'tube'|'terrain'|'harmonograph'|'flowfield'|'epicycles'|'chladni'|'moire'|'landscape'} newShape
  */
 export function setShape(newShape) {
   shape = newShape;
@@ -213,6 +214,7 @@ export function dispose() {
  */
 export function getProjectedPaths() {
   if (!camera || waveLines.length === 0) return [];
+  if (shape === 'landscape') return _getLandscapeProjectedPaths();
 
   camera.updateMatrixWorld();
 
@@ -223,6 +225,8 @@ export function getProjectedPaths() {
   const allPaths = [];
 
   for (const line of waveLines) {
+    // Skip fill meshes (landscape shape) — they are occluders, not plotter paths
+    if (line instanceof THREE.Mesh) continue;
     const attr = line.geometry.attributes.position;
     if (!attr) continue;
 
@@ -319,6 +323,7 @@ function _rebuildAll(allFrames, isLive) {
     case 'harmonograph': _rebuildHarmonograph(allFrames, isLive); break;
     case 'flowfield':    _rebuildFlowField(allFrames, isLive);    break;
     case 'chladni':      _rebuildChladni(allFrames, isLive);      break;
+    case 'landscape':    _rebuildLandscape(allFrames, isLive);    break;
   }
 }
 
@@ -872,6 +877,67 @@ function _rebuildChladni(allFrames, isLive) {
 }
 
 /**
+ * Landscape — Joy Division *Unknown Pleasures* style.
+ * Back-to-front pass: each frame gets an opaque fill polygon (background colour)
+ * that occludes geometry behind it, then a bright wave-line stroke on top.
+ * The result is clean horizon gaps between ridges.
+ * THREE.Mesh fills are skipped by getProjectedPaths so they don't appear in G-code.
+ */
+function _rebuildLandscape(allFrames, isLive) {
+  if (!allFrames || allFrames.length === 0) return;
+
+  const F        = allFrames.length;
+  const zSpacing = SCENE_DEPTH / Math.max(cfg.maxFrames - 1, 1);
+  const FLOOR_Y  = -10;
+  const SUB      = 64;   // subsampled vertices for fill polygon (performance)
+
+  // Render oldest frame first (highest Z), so nearest frames occlude those behind.
+  for (let fi = 0; fi < F; fi++) {
+    const data = _toMono(allFrames[fi]);
+    const N    = data.length;
+    const z    = fi * zSpacing;
+
+    // ---- Fill polygon ----
+    // Shape: bottom-left → wave profile → bottom-right (auto-closes)
+    const shape = new THREE.Shape();
+    shape.moveTo(-SCENE_W / 2, FLOOR_Y);
+
+    for (let s = 0; s < SUB; s++) {
+      const si = Math.floor(s * (N - 1) / (SUB - 1));
+      const x  = (si / (N - 1)) * SCENE_W - SCENE_W / 2;
+      const y  = data[si] * 4 * cfg.ampScale;
+      shape.lineTo(x, y);
+    }
+
+    shape.lineTo(SCENE_W / 2, FLOOR_Y);
+
+    const fillGeo = new THREE.ShapeGeometry(shape);
+    const fillMat = new THREE.MeshBasicMaterial({
+      color:               0x0a0a0a,
+      polygonOffset:       true,
+      polygonOffsetFactor: 1,
+      polygonOffsetUnits:  1,
+      side:                THREE.DoubleSide,
+    });
+    const mesh = new THREE.Mesh(fillGeo, fillMat);
+    mesh.position.z = z;
+    waveLines.push(mesh);
+    scene.add(mesh);
+
+    // ---- Wave stroke ----
+    const pos = new Float32Array(N * 3);
+    for (let i = 0; i < N; i++) {
+      pos[i * 3]     = (i / (N - 1)) * SCENE_W - SCENE_W / 2;
+      pos[i * 3 + 1] = data[i] * 4 * cfg.ampScale;
+      pos[i * 3 + 2] = z;
+    }
+    const line = _makeLine(pos, fi, isLive);
+    waveLines.push(line);
+    scene.add(line);
+  }
+}
+
+/**
  * Epicycles — DFT arm snapshot per recorded frame.
  * Each frame shows the position of K spinning arms at a fixed t value.
  */
@@ -951,6 +1017,102 @@ function _buildMoireLines(frameData, frameIndex, isLive) {
 // ---------------------------------------------------------------------------
 // Helpers — existing
 // ---------------------------------------------------------------------------
+
+/**
+ * Landscape-specific projection: applies screen-space horizon masking so that
+ * only the visible (un-occluded) portions of each wave line are exported.
+ * Wave lines are processed front-to-back; each line's projected crest updates
+ * the horizon buffer, and only points above the running horizon are emitted.
+ */
+function _getLandscapeProjectedPaths() {
+  camera.updateMatrixWorld();
+  const vpMatrix = new THREE.Matrix4();
+  vpMatrix.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
+  const e = vpMatrix.elements;
+
+  // 1024-bucket horizon across NDC X [-2, +2]
+  const N_BUCKETS = 1024;
+  const horizon   = new Float32Array(N_BUCKETS).fill(-Infinity);
+
+  function ndcToB(nx) {
+    return Math.max(0, Math.min(N_BUCKETS - 1, Math.floor((nx + 2) / 4 * N_BUCKETS)));
+  }
+
+  function project(x, y, z) {
+    const rx = e[0]*x + e[4]*y + e[8]*z  + e[12];
+    const ry = e[1]*x + e[5]*y + e[9]*z  + e[13];
+    const rw = e[3]*x + e[7]*y + e[11]*z + e[15];
+    if (rw <= 0.001) return null;
+    return { nx: rx / rw, ny: ry / rw };
+  }
+
+  // Collect wave lines only (skip THREE.Mesh fills), preserve stored order (back-to-front)
+  const lineObjects = waveLines.filter(l => !(l instanceof THREE.Mesh));
+  if (lineObjects.length === 0) return [];
+
+  const allPaths = [];
+
+  // Process nearest-first (reverse storage order) so closer ridges set the horizon first
+  for (let li = lineObjects.length - 1; li >= 0; li--) {
+    const line = lineObjects[li];
+    const attr = line.geometry.attributes.position;
+    if (!attr) continue;
+
+    // Project all vertices
+    const pts = [];
+    for (let i = 0; i < attr.count; i++) {
+      pts.push(project(attr.getX(i), attr.getY(i), attr.getZ(i)));
+    }
+
+    // Emit sub-paths: only points above the current horizon
+    const subPaths = [];
+    let current = null;
+
+    for (const pt of pts) {
+      if (!pt || Math.abs(pt.nx) > 2.0 || Math.abs(pt.ny) > 2.0) {
+        if (current && current.length > 1) subPaths.push(current);
+        current = null;
+        continue;
+      }
+      if (pt.ny >= horizon[ndcToB(pt.nx)]) {
+        if (!current) current = [];
+        current.push({ nx: pt.nx, ny: pt.ny });
+      } else {
+        if (current && current.length > 1) subPaths.push(current);
+        current = null;
+      }
+    }
+    if (current && current.length > 1) subPaths.push(current);
+    allPaths.push(...subPaths);
+
+    // Update horizon with this line's crest; interpolate between consecutive points
+    // to avoid gaps when projected points are far apart in bucket space.
+    let prevPt = null;
+    for (const pt of pts) {
+      if (!pt || Math.abs(pt.nx) > 2.0 || Math.abs(pt.ny) > 2.0) {
+        prevPt = null;
+        continue;
+      }
+      const b = ndcToB(pt.nx);
+      if (pt.ny > horizon[b]) horizon[b] = pt.ny;
+
+      if (prevPt) {
+        const b0 = ndcToB(prevPt.nx), b1 = b;
+        const bMin = Math.min(b0, b1), bMax = Math.max(b0, b1);
+        for (let bi = bMin + 1; bi < bMax; bi++) {
+          const t  = (bi - bMin) / (bMax - bMin);
+          const iy = prevPt.ny + t * (pt.ny - prevPt.ny);
+          if (iy > horizon[bi]) horizon[bi] = iy;
+        }
+      }
+      prevPt = pt;
+    }
+  }
+
+  return allPaths;
+}
+
+
 
 function _makeLine(positions, frameIndex, isLive) {
   const geo = new THREE.BufferGeometry();
@@ -1070,6 +1232,7 @@ function _positionCameraForShape(s) {
     epicycles:    { pos: [0,  5, 20],  lookAt: [0, 0,  0] },
     chladni:      { pos: [0, 22,  3],  lookAt: [0, 0,  0] },
     moire:        { pos: [0, 22,  3],  lookAt: [0, 0,  0] },
+    landscape:    { pos: [0,  6, 28],  lookAt: [0, 1, 10] },
   };
   const { pos, lookAt } = positions[s] || positions.linear;
   camera.position.set(...pos);
