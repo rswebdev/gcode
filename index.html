@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Audio Wave Visualizer → G-code</title>
+  <link rel="stylesheet" href="style.css">
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.169.0/examples/jsm/"
+    }
+  }
+  </script>
+</head>
+<body>
+  <canvas id="viz-canvas"></canvas>
+
+  <div id="hud">
+    <section id="controls-top">
+      <button id="btn-record">Record</button>
+      <button id="btn-export" disabled>Export G-code</button>
+      <button id="btn-export-anaglyph" disabled>Export Anaglyph</button>
+      <span id="status-label">Idle</span>
+      <span id="frame-counter">0 frames</span>
+    </section>
+
+    <section id="controls-mode">
+      <label for="mode-select">Data</label>
+      <select id="mode-select">
+        <option value="time">Time</option>
+        <option value="frequency">Frequency</option>
+        <option value="stereo">Stereo</option>
+      </select>
+      <label for="shape-select">Shape</label>
+      <select id="shape-select">
+        <option value="linear">Linear (stacked)</option>
+        <option value="circular">Circular (concentric)</option>
+        <option value="spiral">Spiral</option>
+        <option value="lissajous">Lissajous (L×R)</option>
+        <option value="phyllotaxis">Phyllotaxis (golden spiral)</option>
+        <option value="tube">Tube (helix ribs)</option>
+        <option value="terrain">Terrain (horizon mask)</option>
+        <option value="harmonograph">Harmonograph (pendulum)</option>
+        <option value="flowfield">Flow Field (streamlines)</option>
+        <option value="epicycles">Epicycles (DFT arms)</option>
+        <option value="chladni">Chladni (nodal lines)</option>
+        <option value="moire">Moiré (offset rings)</option>
+      </select>
+    </section>
+
+    <section id="controls-settings">
+      <label>
+        Max Frames
+        <input id="setting-max-frames" type="number" value="64" min="8" max="256" step="1">
+      </label>
+      <label>
+        Amp Scale
+        <input id="setting-amp-scale" type="number" value="2.0" step="0.1" min="0.1" max="10">
+      </label>
+      <label>
+        Speed (mm/min)
+        <input id="setting-feed-rate" type="number" value="3000" min="100" max="10000" step="100">
+      </label>
+      <label>
+        FFT Size
+        <input id="setting-fft-size" type="number" value="512" min="32" max="2048" step="32">
+      </label>
+    </section>
+  </div>
+
+  <script type="module" src="src/main.js"></script>
+</body>
+</html>
