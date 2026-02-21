@@ -8,6 +8,7 @@ import * as audio      from './audio.js';
 import * as recorder   from './recorder.js';
 import * as visualizer from './visualizer.js';
 import * as gcode      from './gcode.js';
+import * as noise      from './noise.js';
 
 // ---------------------------------------------------------------------------
 // DOM refs
@@ -18,6 +19,7 @@ const btnExport          = document.getElementById('btn-export');
 const btnExportAnaglyph  = document.getElementById('btn-export-anaglyph');
 const statusLabel        = document.getElementById('status-label');
 const frameCounter  = document.getElementById('frame-counter');
+const sourceSelect  = document.getElementById('source-select');
 const modeSelect    = document.getElementById('mode-select');
 const shapeSelect   = document.getElementById('shape-select');
 const inputMaxFrames  = document.getElementById('setting-max-frames');
@@ -25,12 +27,28 @@ const inputAmpScale   = document.getElementById('setting-amp-scale');
 const inputFeedRate   = document.getElementById('setting-feed-rate');
 const inputFftSize    = document.getElementById('setting-fft-size');
 
+// Noise controls
+const noiseSection     = document.getElementById('controls-noise');
+const noiseTypeSelect  = document.getElementById('noise-type');
+const noiseSeedInput   = document.getElementById('noise-seed');
+const noiseSpeedInput  = document.getElementById('noise-speed');
+const noiseFreqInput   = document.getElementById('noise-frequency');
+const noiseOctInput    = document.getElementById('noise-octaves');
+const noisePersInput   = document.getElementById('noise-persistence');
+const noiseSpeedVal    = document.getElementById('noise-speed-val');
+const noiseFreqVal     = document.getElementById('noise-freq-val');
+const noiseOctVal      = document.getElementById('noise-oct-val');
+const noisePersVal     = document.getElementById('noise-pers-val');
+// Labels that only apply to perlin/sine (hidden for white noise)
+const noiseOctaveCtrl  = document.querySelectorAll('.noise-octave-ctrl');
+
 // ---------------------------------------------------------------------------
 // State
 // ---------------------------------------------------------------------------
 let appState    = 'IDLE';   // IDLE | RECORDING | STOPPED
-let currentMode = 'time';
+let currentMode  = 'time';
 let currentShape = 'linear';
+let currentSource = 'mic';  // 'mic' | 'noise'
 let audioReady  = false;
 let vizReady    = false;
 let tickCount   = 0;
@@ -50,6 +68,19 @@ function getConfig() {
   // Amplitude scale in mm: each row gets rowSpacing * 0.45 * ampScale mm of swing.
   // We pass ampScale directly; gcode.js computes rowSpacing internally.
   return { maxFrames, ampScale, feedRate, fftSize, amplitudeScaleMm: ampScale };
+}
+
+/** Read current noise-parameter inputs. */
+function getNoiseConfig() {
+  return {
+    noiseType:   noiseTypeSelect.value,
+    seed:        Math.max(0, parseInt(noiseSeedInput.value) || 42),
+    speed:       parseFloat(noiseSpeedInput.value),
+    frequency:   parseFloat(noiseFreqInput.value),
+    octaves:     parseInt(noiseOctInput.value),
+    persistence: parseFloat(noisePersInput.value),
+    fftSize:     Math.max(32, Math.min(2048, parseInt(inputFftSize.value) || 512)),
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -116,10 +147,17 @@ btnRecord.addEventListener('click', async () => {
     visualizer.updateConfig(cfg);
     visualizer.clearWaveLines();
 
-    if (!audioReady) {
-      statusLabel.textContent = 'Requesting microphone…';
-      await audio.init(cfg);
-      audioReady = true;
+    if (currentSource === 'noise') {
+      // Noise source: no microphone needed — configure and reset
+      noise.configure({ ...getNoiseConfig(), fftSize: cfg.fftSize });
+      noise.reset();
+    } else {
+      // Microphone source
+      if (!audioReady) {
+        statusLabel.textContent = 'Requesting microphone…';
+        await audio.init(cfg);
+        audioReady = true;
+      }
     }
 
     recorder.configure({ maxFrames: cfg.maxFrames, mode: currentMode });
@@ -225,13 +263,93 @@ shapeSelect.addEventListener('change', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Event: Source change
+// ---------------------------------------------------------------------------
+sourceSelect.addEventListener('change', () => {
+  currentSource = sourceSelect.value;
+
+  // Show/hide noise panel
+  noiseSection.classList.toggle('hidden', currentSource !== 'noise');
+
+  // Pre-configure noise when switching to it so live preview starts immediately
+  if (currentSource === 'noise') {
+    const cfg = getConfig();
+    noise.configure({ ...getNoiseConfig(), fftSize: cfg.fftSize });
+    noise.reset();
+  }
+
+  // Clear any recorded content — source change invalidates previous data
+  recorder.reset();
+  visualizer.clearWaveLines();
+  btnExport.disabled = true;
+  btnExportAnaglyph.disabled = true;
+  frameCounter.textContent = '0 frames';
+  if (appState === 'STOPPED') setAppState('IDLE');
+});
+
+// ---------------------------------------------------------------------------
+// Events: Noise parameter sliders / inputs
+// Live-update the noise module and the output display elements.
+// ---------------------------------------------------------------------------
+function _syncNoiseOctaveControls() {
+  // Octaves / persistence don't apply to white noise
+  const isWhite = noiseTypeSelect.value === 'white';
+  noiseOctaveCtrl.forEach(el => el.classList.toggle('hidden', isWhite));
+}
+
+function _applyNoiseConfig() {
+  if (currentSource !== 'noise') return;
+  const cfg = getConfig();
+  noise.configure({ ...getNoiseConfig(), fftSize: cfg.fftSize });
+}
+
+noiseTypeSelect.addEventListener('change', () => {
+  _syncNoiseOctaveControls();
+  _applyNoiseConfig();
+});
+
+noiseSeedInput.addEventListener('change', () => {
+  // Seed change: reconfigure (which resets time cursor) for reproducibility
+  _applyNoiseConfig();
+  noise.reset();
+  // Clear visualizer so the new seed plays from the start
+  if (appState !== 'RECORDING') {
+    recorder.reset();
+    visualizer.clearWaveLines();
+    if (appState === 'STOPPED') setAppState('IDLE');
+  }
+});
+
+noiseSpeedInput.addEventListener('input', () => {
+  noiseSpeedVal.value = noiseSpeedInput.value;
+  _applyNoiseConfig();
+});
+
+noiseFreqInput.addEventListener('input', () => {
+  noiseFreqVal.value = noiseFreqInput.value;
+  _applyNoiseConfig();
+});
+
+noiseOctInput.addEventListener('input', () => {
+  noiseOctVal.value = noiseOctInput.value;
+  _applyNoiseConfig();
+});
+
+noisePersInput.addEventListener('input', () => {
+  noisePersVal.value = noisePersInput.value;
+  _applyNoiseConfig();
+});
+
+// ---------------------------------------------------------------------------
 // rAF loop — runs always once visualizer is initialised
 // ---------------------------------------------------------------------------
 function loop() {
   requestAnimationFrame(loop);
 
-  if (audioReady) {
-    const frame = audio.getFrame(currentMode);
+  if (audioReady || currentSource === 'noise') {
+    const frame = currentSource === 'noise'
+      ? noise.getFrame(currentMode)
+      : audio.getFrame(currentMode);
     const allFrames = visualizer.REBUILD_ALL_SHAPES.has(currentShape) ? recorder.getFrames() : null;
 
     // Live preview (always update).
@@ -269,5 +387,10 @@ window.addEventListener('DOMContentLoaded', () => {
   visualizer.init(canvas, getConfig());
   vizReady = true;
   setAppState('IDLE');
+
+  // Pre-configure noise with defaults so it's ready instantly on source switch.
+  const cfg = getConfig();
+  noise.configure({ ...getNoiseConfig(), fftSize: cfg.fftSize });
+
   requestAnimationFrame(loop);
 });

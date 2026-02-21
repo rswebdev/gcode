@@ -27,6 +27,11 @@
     </section>
 
     <section id="controls-mode">
+      <label for="source-select">Source</label>
+      <select id="source-select">
+        <option value="mic">Microphone</option>
+        <option value="noise">Noise Generator</option>
+      </select>
       <label for="mode-select">Data</label>
       <select id="mode-select">
         <option value="time">Time</option>
@@ -48,6 +53,39 @@
         <option value="chladni">Chladni (nodal lines)</option>
         <option value="moire">Moiré (offset rings)</option>
       </select>
+    </section>
+
+    <section id="controls-noise" class="hidden">
+      <label for="noise-type">Type</label>
+      <select id="noise-type">
+        <option value="perlin">Perlin fBm</option>
+        <option value="sine">Sine Sum</option>
+        <option value="white">White Noise</option>
+      </select>
+      <label>
+        Seed
+        <input id="noise-seed" type="number" value="42" min="0" max="99999" step="1">
+      </label>
+      <label>
+        Speed
+        <input id="noise-speed" type="range" value="0.005" min="0.001" max="0.04" step="0.001">
+        <output id="noise-speed-val">0.005</output>
+      </label>
+      <label>
+        Frequency
+        <input id="noise-frequency" type="range" value="2" min="0.5" max="8" step="0.5">
+        <output id="noise-freq-val">2</output>
+      </label>
+      <label class="noise-octave-ctrl">
+        Octaves
+        <input id="noise-octaves" type="range" value="4" min="1" max="6" step="1">
+        <output id="noise-oct-val">4</output>
+      </label>
+      <label class="noise-octave-ctrl">
+        Persistence
+        <input id="noise-persistence" type="range" value="0.5" min="0.1" max="0.9" step="0.05">
+        <output id="noise-pers-val">0.5</output>
+      </label>
     </section>
 
     <section id="controls-settings">
