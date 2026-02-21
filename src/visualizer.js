@@ -618,34 +618,32 @@ function _rebuildTerrain(allFrames, isLive) {
   const N = _toMono(allFrames[0]).length;
   const zSpacing = SCENE_DEPTH / Math.max(cfg.maxFrames - 1, 1);
 
-  // Horizon: minimum Y seen so far (we only draw points ABOVE the horizon)
+  // Pre-compute every Y value so both horizontal and perpendicular passes share data.
+  const yValues = [];
+  for (let fi = 0; fi < F; fi++) {
+    const data = _toMono(allFrames[fi]);
+    const ys   = new Float32Array(N);
+    for (let i = 0; i < N; i++) ys[i] = data[i] * 4 * cfg.ampScale;
+    yValues.push(ys);
+  }
+
+  // ---- HORIZONTAL LINES (wave profiles, horizon-masked) ----
+  // Process newest→oldest so front frames set the horizon for back frames.
   const horizonY = new Float32Array(N).fill(-1000);
 
-  // Process from newest (front, high fi) to oldest (back, low fi)
   for (let fi = F - 1; fi >= 0; fi--) {
-    const data = _toMono(allFrames[fi]);
-    const z    = fi * zSpacing;
-
-    // Compute Y values for this frame
-    const ys = new Float32Array(N);
-    for (let i = 0; i < N; i++) {
-      ys[i] = data[i] * 4 * cfg.ampScale;
-    }
-
-    // Collect visible sub-segments (above horizon)
+    const ys = yValues[fi];
+    const z  = fi * zSpacing;
     let segPts = null;
 
     for (let i = 0; i < N; i++) {
       const x = (i / (N - 1)) * SCENE_W - SCENE_W / 2;
-      const y = ys[i];
-
-      if (y > horizonY[i]) {
+      if (ys[i] > horizonY[i]) {
         if (!segPts) segPts = [];
-        segPts.push(x, y, z);
+        segPts.push(x, ys[i], z);
       } else {
         if (segPts && segPts.length >= 6) {
-          const pos = new Float32Array(segPts);
-          const line = _makeLine(pos, fi, isLive);
+          const line = _makeLine(new Float32Array(segPts), fi, isLive);
           waveLines.push(line);
           scene.add(line);
         }
@@ -653,17 +651,54 @@ function _rebuildTerrain(allFrames, isLive) {
       }
     }
     if (segPts && segPts.length >= 6) {
-      const pos = new Float32Array(segPts);
-      const line = _makeLine(pos, fi, isLive);
+      const line = _makeLine(new Float32Array(segPts), fi, isLive);
       waveLines.push(line);
       scene.add(line);
     }
-
-    // Update horizon with this frame's Y values
-    for (let i = 0; i < N; i++) {
-      if (ys[i] > horizonY[i]) horizonY[i] = ys[i];
-    }
+    for (let i = 0; i < N; i++) if (ys[i] > horizonY[i]) horizonY[i] = ys[i];
   }
+
+  // ---- PERPENDICULAR LINES (cross-sections along Z, horizon-masked per column) ----
+  // Spacing chosen so the count of vertical lines ≈ count of horizontal lines,
+  // giving a roughly square mesh cell.
+  const N_STEP = Math.max(4, Math.min(64, Math.round(N / Math.max(F, 4))));
+
+  for (let si = 0; si < N; si += N_STEP) {
+    const x = (si / (N - 1)) * SCENE_W - SCENE_W / 2;
+    // Per-column horizon: highest Y seen so far coming from the front (newest) frame.
+    let colHorizon = -1000;
+    let segPts = null;
+
+    // Walk newest→oldest (Z decreasing from camera perspective).
+    for (let fi = F - 1; fi >= 0; fi--) {
+      const y = yValues[fi][si];
+      const z = fi * zSpacing;
+
+      if (y > colHorizon) {
+        if (!segPts) segPts = [];
+        segPts.push(x, y, z);
+        colHorizon = y;
+      } else {
+        if (segPts && segPts.length >= 6) {
+          _emitTerrainPerp(segPts, isLive);
+        }
+        segPts = null;
+      }
+    }
+    if (segPts && segPts.length >= 6) _emitTerrainPerp(segPts, isLive);
+  }
+}
+
+/** Emit one perpendicular terrain segment with a slightly cooler tint. */
+function _emitTerrainPerp(pts, isLive) {
+  const pos = new Float32Array(pts);
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  const color = isLive ? new THREE.Color(0xffffff) : new THREE.Color(0x4488bb);
+  const mat   = new THREE.LineBasicMaterial({ color, transparent: true, opacity: isLive ? 0.4 : 0.45 });
+  const line  = new THREE.Line(geo, mat);
+  waveLines.push(line);
+  scene.add(line);
 }
 
 /**
