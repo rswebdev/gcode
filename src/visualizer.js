@@ -306,6 +306,34 @@ export function getStereoPaths(iod = 0.65) {
   return { leftPaths, rightPaths };
 }
 
+/**
+ * Return the current camera position and orbit target so the caller can
+ * embed them in a filename or header comment for later reproduction.
+ * Values are rounded to two decimal places.
+ */
+export function getCameraState() {
+  if (!camera) return null;
+  const p = camera.position;
+  const t = controls ? controls.target : new THREE.Vector3();
+  const r = v => Math.round(v * 100) / 100;
+  return {
+    position: [r(p.x), r(p.y), r(p.z)],
+    target:   [r(t.x), r(t.y), r(t.z)],
+  };
+}
+
+/**
+ * Programmatically set the camera position and orbit target.
+ * @param {[number,number,number]} position
+ * @param {[number,number,number]} target
+ */
+export function setCameraState(position, target) {
+  if (!camera || !controls) return;
+  camera.position.set(...position);
+  controls.target.set(...target);
+  controls.update();
+}
+
 // ---------------------------------------------------------------------------
 // Central REBUILD_ALL dispatcher
 // ---------------------------------------------------------------------------
