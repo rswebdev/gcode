@@ -281,21 +281,63 @@ export function downloadGCode(content, filename) {
   setTimeout(() => URL.revokeObjectURL(url), 5000);
 }
 
+// ---------------------------------------------------------------------------
+// Filename generation — three random evocative words
+// ---------------------------------------------------------------------------
+const _WORDS = [
+  'alpha','amber','arc','ash','aurora','axis','basin','beam','bloom','bore',
+  'brine','brume','cairn','crest','curl','curve','delta','depth','dune','dust',
+  'drift','echo','edge','ember','epoch','fault','field','flare','flux','foam',
+  'fold','fringe','gap','ghost','grain','grove','haze','helix','helm','hollow',
+  'hum','iris','keel','lace','layer','ledge','lens','lobe','loom','lune',
+  'mast','mesa','mist','mode','moor','nave','node','notch','null','orbit',
+  'oxbow','peak','phase','pitch','plume','polar','pond','prism','pulse',
+  'quartz','radix','raft','range','reef','ridge','rime','rune','sand','scope',
+  'shard','shear','shift','silt','slab','slope','smoke','span','spire','stave',
+  'stem','stone','strand','stria','surge','tarn','tide','tilt','tone','trace',
+  'trench','tuft','umbra','vale','vane','veil','vein','vent','void','vortex',
+  'wake','warp','wave','wire','yarn','zone',
+];
+
+/** Return a filename like `waveform-amber-ridge-pulse.gcode`. */
+export function generateFilename() {
+  const pick = () => _WORDS[Math.floor(Math.random() * _WORDS.length)];
+  return `waveform-${pick()}-${pick()}-${pick()}.gcode`;
+}
+
+// ---------------------------------------------------------------------------
+// Generation-parameter header comments
+// ---------------------------------------------------------------------------
 /**
- * @param {'time'|'frequency'|'stereo'} dataMode
- * @param {'linear'|'circular'|'spiral'|'lissajous'} shape
- * @param {number} [seed]  noise seed value
- * @param {{position:[number,number,number], target:[number,number,number]}|null} [cam]
- * @returns {string}
+ * Append `; key: value` comment lines for all known generation parameters.
+ * @param {string[]} lines
+ * @param {object}  params
  */
-export function generateFilename(dataMode, shape, seed, cam) {
-  const fmtV = v => Number.isInteger(v) ? String(v) : String(v).replace('.', 'p');
-  const fmtT = arr => arr.map(fmtV).join('_');
-
-  const seedPart = seed != null ? `-s${seed}` : '';
-  const camPart  = cam  ? `-p${fmtT(cam.position)}-t${fmtT(cam.target)}` : '';
-
-  return `wave-${shape}-${dataMode}${seedPart}${camPart}-${Date.now()}.gcode`;
+function _writeParams(lines, params) {
+  if (!params) return;
+  const p = (label, value) => lines.push(`; ${label.padEnd(16)} ${value}`);
+  lines.push('; --- Generation Parameters ---');
+  if (params.shape     != null) p('Shape:',       params.shape);
+  if (params.source    != null) p('Source:',      params.source);
+  if (params.dataMode  != null) p('Data mode:',   params.dataMode);
+  if (params.source === 'noise') {
+    if (params.noiseType != null) p('Noise type:',  params.noiseType);
+    if (params.seed      != null) p('Seed:',        params.seed);
+    if (params.noiseSpeed  != null) p('Noise speed:', params.noiseSpeed);
+    if (params.noiseFreq   != null) p('Noise freq:',  params.noiseFreq);
+    if (params.noiseOct    != null) p('Noise oct:',   params.noiseOct);
+    if (params.noisePers   != null) p('Noise pers:',  params.noisePers);
+  }
+  if (params.maxFrames != null) p('Max frames:',  params.maxFrames);
+  if (params.ampScale  != null) p('Amp scale:',   params.ampScale);
+  if (params.fftSize   != null) p('FFT size:',    params.fftSize);
+  if (params.feedRate  != null) p('Feed rate:',   `${params.feedRate} mm/min`);
+  if (params.camera != null) {
+    const { position: [px, py, pz], target: [tx, ty, tz] } = params.camera;
+    p('Camera pos:',  `${px} ${py} ${pz}`);
+    p('Camera tgt:',  `${tx} ${ty} ${tz}`);
+  }
+  lines.push('; ---');
 }
 
 /**
@@ -331,12 +373,7 @@ export function projectedPathsToGCode(paths, config = {}) {
   lines.push(`; Paths: ${paths.length} | Generated: ${ts}`);
   lines.push(`; Paper: A4 (${PAPER_W}x${PAPER_H}mm), ${MARGIN}mm margins`);
   lines.push(`; Plot area: ${PLOT_W} x ${PLOT_H} mm`);
-  if (config.seed   != null) lines.push(`; Seed: ${config.seed}`);
-  if (config.camera != null) {
-    const { position: [px, py, pz], target: [tx, ty, tz] } = config.camera;
-    lines.push(`; Camera position: ${px} ${py} ${pz}`);
-    lines.push(`; Camera target:   ${tx} ${ty} ${tz}`);
-  }
+  _writeParams(lines, config.params);
   lines.push(`G21          ; Units: millimetres`);
   lines.push(`G90          ; Absolute positioning`);
   lines.push(`G0 Z${f(penUpZ)}`);
@@ -393,12 +430,7 @@ export function stereoPathsToGCode(leftPaths, rightPaths, config = {}) {
   lines.push(`; Generated: ${ts}`);
   lines.push(`; Paper: A4 (${PAPER_W}x${PAPER_H}mm), ${MARGIN}mm margins`);
   lines.push(`; Pass 1 = RED pen (left eye)  |  Pass 2 = CYAN pen (right eye)`);
-  if (config.seed   != null) lines.push(`; Seed: ${config.seed}`);
-  if (config.camera != null) {
-    const { position: [px, py, pz], target: [tx, ty, tz] } = config.camera;
-    lines.push(`; Camera position: ${px} ${py} ${pz}`);
-    lines.push(`; Camera target:   ${tx} ${ty} ${tz}`);
-  }
+  _writeParams(lines, config.params);
   lines.push(`G21          ; Units: millimetres`);
   lines.push(`G90          ; Absolute positioning`);
   lines.push(`G0 Z${f(penUpZ)}`);
