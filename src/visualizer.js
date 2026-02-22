@@ -322,6 +322,11 @@ export function getCameraState() {
   };
 }
 
+/** Return the camera's viewport aspect ratio (width / height). */
+export function getCameraAspect() {
+  return camera ? camera.aspect : 1;
+}
+
 /**
  * Programmatically set the camera position and orbit target.
  * @param {[number,number,number]} position

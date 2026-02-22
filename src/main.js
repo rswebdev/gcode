@@ -221,6 +221,7 @@ btnExport.addEventListener('click', () => {
     penDownFeedRate: 300,
     penUpZ:          5,
     penDownZ:        0,
+    aspect:          visualizer.getCameraAspect(),
     params,
   });
   gcode.downloadGCode(content, gcode.generateFilename(params));
@@ -240,6 +241,7 @@ btnExportAnaglyph.addEventListener('click', () => {
     penDownFeedRate: 300,
     penUpZ:          5,
     penDownZ:        0,
+    aspect:          visualizer.getCameraAspect(),
     params,
   });
   gcode.downloadGCode(content, gcode.generateFilename(params).replace('.gcode', '-anaglyph.gcode'));
