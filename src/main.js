@@ -18,7 +18,10 @@ const btnRecord          = document.getElementById('btn-record');
 const btnExport          = document.getElementById('btn-export');
 const btnExportAnaglyph  = document.getElementById('btn-export-anaglyph');
 const statusLabel        = document.getElementById('status-label');
-const frameCounter  = document.getElementById('frame-counter');
+const frameCounter       = document.getElementById('frame-counter');
+const btnHelp            = document.getElementById('btn-help');
+const helpModal          = document.getElementById('help-modal');
+const btnHelpClose       = document.getElementById('btn-help-close');
 const sourceSelect  = document.getElementById('source-select');
 const modeSelect    = document.getElementById('mode-select');
 const shapeSelect   = document.getElementById('shape-select');
@@ -47,13 +50,17 @@ const cameraPosInput    = document.getElementById('camera-pos');
 const cameraTargetInput = document.getElementById('camera-target');
 const btnCameraSet      = document.getElementById('btn-camera-set');
 
+// Advanced panel toggle
+const advancedPanel  = document.getElementById('advanced-panel');
+const advancedToggle = document.getElementById('advanced-toggle');
+
 // ---------------------------------------------------------------------------
 // State
 // ---------------------------------------------------------------------------
 let appState    = 'IDLE';   // IDLE | RECORDING | STOPPED
 let currentMode  = 'time';
-let currentShape = 'linear';
-let currentSource = 'mic';  // 'mic' | 'noise'
+let currentShape = 'terrain';
+let currentSource = 'noise';  // 'mic' | 'noise'
 let audioReady  = false;
 let vizReady    = false;
 let tickCount   = 0;
@@ -376,6 +383,30 @@ btnCameraSet.addEventListener('click', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Advanced panel toggle
+// ---------------------------------------------------------------------------
+advancedToggle.addEventListener('click', e => {
+  e.preventDefault();
+  const nowHidden = advancedPanel.classList.toggle('hidden');
+  advancedToggle.textContent = nowHidden ? 'Advanced ▸' : 'Advanced ▾';
+});
+
+// ---------------------------------------------------------------------------
+// Help modal
+// ---------------------------------------------------------------------------
+function _openHelp()  { helpModal.classList.remove('hidden'); }
+function _closeHelp() { helpModal.classList.add('hidden'); }
+
+btnHelp.addEventListener('click', _openHelp);
+btnHelpClose.addEventListener('click', _closeHelp);
+
+// Close on backdrop click (outside the content box).
+helpModal.addEventListener('click', e => { if (e.target === helpModal) _closeHelp(); });
+
+// Close on Escape key.
+document.addEventListener('keydown', e => { if (e.key === 'Escape') _closeHelp(); });
+
+// ---------------------------------------------------------------------------
 // rAF loop — runs always once visualizer is initialised
 // ---------------------------------------------------------------------------
 function loop() {
@@ -433,6 +464,8 @@ function loop() {
 window.addEventListener('DOMContentLoaded', () => {
   // Pre-init the visualizer (no audio needed).
   visualizer.init(canvas, getConfig());
+  // Apply default shape so camera is positioned correctly from the start.
+  visualizer.setShape(currentShape);
   vizReady = true;
   setAppState('IDLE');
 
