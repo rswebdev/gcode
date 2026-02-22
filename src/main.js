@@ -223,7 +223,7 @@ btnExport.addEventListener('click', () => {
     penDownZ:        0,
     params,
   });
-  gcode.downloadGCode(content, gcode.generateFilename());
+  gcode.downloadGCode(content, gcode.generateFilename(params));
 });
 
 // ---------------------------------------------------------------------------
@@ -242,7 +242,7 @@ btnExportAnaglyph.addEventListener('click', () => {
     penDownZ:        0,
     params,
   });
-  gcode.downloadGCode(content, gcode.generateFilename());
+  gcode.downloadGCode(content, gcode.generateFilename(params).replace('.gcode', '-anaglyph.gcode'));
 });
 
 // ---------------------------------------------------------------------------

@@ -282,7 +282,7 @@ export function downloadGCode(content, filename) {
 }
 
 // ---------------------------------------------------------------------------
-// Filename generation — three random evocative words
+// Filename generation — deterministic three-word name from params hash
 // ---------------------------------------------------------------------------
 const _WORDS = [
   'alpha','amber','arc','ash','aurora','axis','basin','beam','bloom','bore',
@@ -299,10 +299,45 @@ const _WORDS = [
   'wake','warp','wave','wire','yarn','zone',
 ];
 
-/** Return a filename like `waveform-amber-ridge-pulse.gcode`. */
-export function generateFilename() {
-  const pick = () => _WORDS[Math.floor(Math.random() * _WORDS.length)];
-  return `waveform-${pick()}-${pick()}-${pick()}.gcode`;
+/** djb2 hash of a string → 32-bit unsigned integer. */
+function _djb2(str) {
+  let h = 5381;
+  for (let i = 0; i < str.length; i++) {
+    h = Math.imul(h, 33) ^ str.charCodeAt(i);
+  }
+  return h >>> 0;
+}
+
+/**
+ * Produce a stable string from params, rounding floats to 2 dp
+ * so minor floating-point drift doesn't change the name.
+ */
+function _paramsKey(params) {
+  const r = v => (v == null ? '' : parseFloat(Number(v).toFixed(2)));
+  const cam = params.camera;
+  return [
+    params.shape, params.source, params.dataMode,
+    params.noiseType, params.seed,
+    r(params.noiseSpeed), r(params.noiseFreq),
+    params.noiseOct, r(params.noisePers),
+    params.maxFrames, r(params.ampScale),
+    params.fftSize, params.feedRate,
+    cam ? cam.position.map(r).join(',') : '',
+    cam ? cam.target.map(r).join(',')   : '',
+  ].join('|');
+}
+
+/**
+ * Return a deterministic filename like `waveform-amber-ridge-pulse.gcode`.
+ * Same params always produce the same name.
+ * @param {object} params - generation parameters from _buildExportParams()
+ */
+export function generateFilename(params) {
+  const n    = _WORDS.length;
+  let   seed = _djb2(_paramsKey(params));
+  // LCG to derive three independent word indices from the hash
+  const next = () => { seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0; return seed; };
+  return `waveform-${_WORDS[next() % n]}-${_WORDS[next() % n]}-${_WORDS[next() % n]}.gcode`;
 }
 
 // ---------------------------------------------------------------------------
@@ -471,10 +506,13 @@ export function stereoPathsToGCode(leftPaths, rightPaths, config = {}) {
   return lines.join('\n');
 }
 
-// Map NDC (-1..+1) to paper coordinates (mm), clamped to plot area.
+// Map NDC (-1..+1) to paper coordinates (mm) using a uniform scale so that
+// aspect ratio is preserved.  The shorter axis (PLOT_W = 190 mm) is the
+// binding constraint; the output is centred on the paper.
+const NDC_SCALE = PLOT_W / 2;   // 95 mm per NDC unit (equal for x and y)
 function _ndcToPaper(nx, ny) {
-  const px = clampX(MARGIN + (nx + 1) / 2 * PLOT_W);
-  const py = clampY(MARGIN + (ny + 1) / 2 * PLOT_H);
+  const px = clampX(CENTER_X + nx *  NDC_SCALE);
+  const py = clampY(CENTER_Y + ny *  NDC_SCALE);
   return { px, py };
 }
 
