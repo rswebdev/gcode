@@ -185,26 +185,45 @@ btnRecord.addEventListener('click', async () => {
 });
 
 // ---------------------------------------------------------------------------
+// Export helpers
+// ---------------------------------------------------------------------------
+function _buildExportParams() {
+  const cfg = getConfig();
+  return {
+    shape:      currentShape,
+    source:     currentSource,
+    dataMode:   currentMode,
+    noiseType:  noiseTypeSelect.value,
+    seed:       parseInt(noiseSeedInput.value) || 42,
+    noiseSpeed: parseFloat(noiseSpeedInput.value),
+    noiseFreq:  parseFloat(noiseFreqInput.value),
+    noiseOct:   parseInt(noiseOctInput.value),
+    noisePers:  parseFloat(noisePersInput.value),
+    maxFrames:  cfg.maxFrames,
+    ampScale:   cfg.ampScale,
+    fftSize:    cfg.fftSize,
+    feedRate:   cfg.feedRate,
+    camera:     visualizer.getCameraState(),
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Event: Export G-code button
 // ---------------------------------------------------------------------------
 btnExport.addEventListener('click', () => {
   if (recorder.getFrameCount() === 0) return;
 
-  const cfg   = getConfig();
-  const paths = visualizer.getProjectedPaths();
-  const seed  = parseInt(noiseSeedInput.value) || 42;
-  const cam   = visualizer.getCameraState();
+  const params = _buildExportParams();
+  const paths  = visualizer.getProjectedPaths();
 
   const content = gcode.projectedPathsToGCode(paths, {
-    feedRate:        cfg.feedRate,
+    feedRate:        params.feedRate,
     penDownFeedRate: 300,
     penUpZ:          5,
     penDownZ:        0,
-    seed,
-    camera: cam,
+    params,
   });
-  const filename = gcode.generateFilename(currentMode, currentShape, seed, cam);
-  gcode.downloadGCode(content, filename);
+  gcode.downloadGCode(content, gcode.generateFilename());
 });
 
 // ---------------------------------------------------------------------------
@@ -213,21 +232,17 @@ btnExport.addEventListener('click', () => {
 btnExportAnaglyph.addEventListener('click', () => {
   if (recorder.getFrameCount() === 0) return;
 
-  const cfg  = getConfig();
-  const seed = parseInt(noiseSeedInput.value) || 42;
-  const cam  = visualizer.getCameraState();
+  const params = _buildExportParams();
   const { leftPaths, rightPaths } = visualizer.getStereoPaths(0.65);
 
   const content = gcode.stereoPathsToGCode(leftPaths, rightPaths, {
-    feedRate:        cfg.feedRate,
+    feedRate:        params.feedRate,
     penDownFeedRate: 300,
     penUpZ:          5,
     penDownZ:        0,
-    seed,
-    camera: cam,
+    params,
   });
-  const filename = gcode.generateFilename(currentMode, currentShape + '-anaglyph', seed, cam);
-  gcode.downloadGCode(content, filename);
+  gcode.downloadGCode(content, gcode.generateFilename());
 });
 
 // ---------------------------------------------------------------------------
