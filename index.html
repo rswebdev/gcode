@@ -24,19 +24,14 @@
       <button id="btn-export-anaglyph" disabled>Export Anaglyph</button>
       <span id="status-label">Idle</span>
       <span id="frame-counter">0 frames</span>
+      <button id="btn-help">?</button>
     </section>
 
-    <section id="controls-mode">
+    <section id="controls-simple">
       <label for="source-select">Source</label>
       <select id="source-select">
         <option value="mic">Microphone</option>
-        <option value="noise">Noise Generator</option>
-      </select>
-      <label for="mode-select">Data</label>
-      <select id="mode-select">
-        <option value="time">Time</option>
-        <option value="frequency">Frequency</option>
-        <option value="stereo">Stereo</option>
+        <option value="noise" selected>Noise Generator</option>
       </select>
       <label for="shape-select">Shape</label>
       <select id="shape-select">
@@ -46,7 +41,7 @@
         <option value="lissajous">Lissajous (L×R)</option>
         <option value="phyllotaxis">Phyllotaxis (golden spiral)</option>
         <option value="tube">Tube (helix ribs)</option>
-        <option value="terrain">Terrain (horizon mask)</option>
+        <option value="terrain" selected>Terrain (horizon mask)</option>
         <option value="harmonograph">Harmonograph (pendulum)</option>
         <option value="flowfield">Flow Field (streamlines)</option>
         <option value="epicycles">Epicycles (DFT arms)</option>
@@ -54,73 +49,160 @@
         <option value="moire">Moiré (offset rings)</option>
         <option value="landscape">Landscape (Joy Division)</option>
       </select>
+      <a id="advanced-toggle" href="#">Advanced ▸</a>
     </section>
 
-    <section id="controls-noise" class="hidden">
-      <label for="noise-type">Type</label>
-      <select id="noise-type">
-        <option value="perlin">Perlin fBm</option>
-        <option value="sine">Sine Sum</option>
-        <option value="white">White Noise</option>
-      </select>
-      <label>
-        Seed
-        <input id="noise-seed" type="number" value="42" min="0" max="99999" step="1">
-      </label>
-      <label>
-        Speed
-        <input id="noise-speed" type="range" value="0.005" min="0.001" max="0.04" step="0.001">
-        <output id="noise-speed-val">0.005</output>
-      </label>
-      <label>
-        Frequency
-        <input id="noise-frequency" type="range" value="2" min="0.5" max="8" step="0.5">
-        <output id="noise-freq-val">2</output>
-      </label>
-      <label class="noise-octave-ctrl">
-        Octaves
-        <input id="noise-octaves" type="range" value="4" min="1" max="6" step="1">
-        <output id="noise-oct-val">4</output>
-      </label>
-      <label class="noise-octave-ctrl">
-        Persistence
-        <input id="noise-persistence" type="range" value="0.5" min="0.1" max="0.9" step="0.05">
-        <output id="noise-pers-val">0.5</output>
-      </label>
-    </section>
+    <div id="advanced-panel" class="hidden">
+      <section id="controls-mode">
+        <label for="mode-select">Data</label>
+        <select id="mode-select">
+          <option value="time" selected>Time</option>
+          <option value="frequency">Frequency</option>
+          <option value="stereo">Stereo</option>
+        </select>
+      </section>
 
-    <section id="controls-settings">
-      <label>
-        Max Frames
-        <input id="setting-max-frames" type="number" value="64" min="8" max="256" step="1">
-      </label>
-      <label>
-        Amp Scale
-        <input id="setting-amp-scale" type="number" value="2.0" step="0.1" min="0.1" max="10">
-      </label>
-      <label>
-        Speed (mm/min)
-        <input id="setting-feed-rate" type="number" value="3000" min="100" max="10000" step="100">
-      </label>
-      <label>
-        FFT Size
-        <input id="setting-fft-size" type="number" value="512" min="32" max="2048" step="32">
-      </label>
-    </section>
+      <section id="controls-noise">
+        <label for="noise-type">Type</label>
+        <select id="noise-type">
+          <option value="perlin" selected>Perlin fBm</option>
+          <option value="sine">Sine Sum</option>
+          <option value="white">White Noise</option>
+        </select>
+        <label>
+          Seed
+          <input id="noise-seed" type="number" value="42" min="0" max="99999" step="1">
+        </label>
+        <label>
+          Speed
+          <input id="noise-speed" type="range" value="0.005" min="0.001" max="0.04" step="0.001">
+          <output id="noise-speed-val">0.005</output>
+        </label>
+        <label>
+          Frequency
+          <input id="noise-frequency" type="range" value="2" min="0.5" max="8" step="0.5">
+          <output id="noise-freq-val">2</output>
+        </label>
+        <label class="noise-octave-ctrl">
+          Octaves
+          <input id="noise-octaves" type="range" value="4" min="1" max="6" step="1">
+          <output id="noise-oct-val">4</output>
+        </label>
+        <label class="noise-octave-ctrl">
+          Persistence
+          <input id="noise-persistence" type="range" value="0.5" min="0.1" max="0.9" step="0.05">
+          <output id="noise-pers-val">0.5</output>
+        </label>
+      </section>
 
-    <section id="controls-camera">
-      <label>
-        Cam pos
-        <input id="camera-pos" type="text" value="0 8 28" spellcheck="false">
-      </label>
-      <label>
-        Target
-        <input id="camera-target" type="text" value="0 0 10" spellcheck="false">
-      </label>
-      <button id="btn-camera-set">Set</button>
-    </section>
+      <section id="controls-settings">
+        <label>
+          Max Frames
+          <input id="setting-max-frames" type="number" value="64" min="8" max="256" step="1">
+        </label>
+        <label>
+          Amp Scale
+          <input id="setting-amp-scale" type="number" value="2.0" step="0.1" min="0.1" max="10">
+        </label>
+        <label>
+          Speed (mm/min)
+          <input id="setting-feed-rate" type="number" value="3000" min="100" max="10000" step="100">
+        </label>
+        <label>
+          FFT Size
+          <input id="setting-fft-size" type="number" value="512" min="32" max="2048" step="32">
+        </label>
+      </section>
+
+      <section id="controls-camera">
+        <label>
+          Cam pos
+          <input id="camera-pos" type="text" value="0 8 28" spellcheck="false">
+        </label>
+        <label>
+          Target
+          <input id="camera-target" type="text" value="0 0 10" spellcheck="false">
+        </label>
+        <button id="btn-camera-set">Set</button>
+      </section>
+    </div>
   </div>
 
   <script type="module" src="src/main.js"></script>
+
+  <div id="help-modal" class="hidden" role="dialog" aria-modal="true" aria-label="Help">
+    <div id="help-content">
+      <button id="btn-help-close">×</button>
+      <h2>Audio Wave Visualizer → G-code</h2>
+
+      <h3>Workflow</h3>
+      <ol>
+        <li>Choose a <strong>Source</strong> (microphone or noise) and a <strong>Shape</strong>.</li>
+        <li>Click <strong>Record</strong> — captures frames at 10 fps, auto-stops at Max Frames.</li>
+        <li>Orbit the 3D view with the mouse, then click <strong>Export G-code</strong>.</li>
+        <li>The exported file contains the current camera view — move the camera first to frame the plot you want.</li>
+      </ol>
+
+      <h3>Camera</h3>
+      <table>
+        <tr><td>Left drag</td><td>Orbit</td></tr>
+        <tr><td>Right drag / two-finger</td><td>Pan</td></tr>
+        <tr><td>Scroll / pinch</td><td>Zoom</td></tr>
+      </table>
+      <p>Cam Pos and Target (in Advanced) show the current coordinates. Paste them back and click <strong>Set</strong> to restore a saved view.</p>
+
+      <h3>Source</h3>
+      <table>
+        <tr><td>Microphone</td><td>Live audio from the browser microphone.</td></tr>
+        <tr><td>Noise Generator</td><td>Algorithmic signal — no microphone needed. Seed value makes it reproducible.</td></tr>
+      </table>
+
+      <h3>Shape</h3>
+      <table>
+        <tr><td>Linear</td><td>Stacked wave rows.</td></tr>
+        <tr><td>Circular</td><td>Concentric ring per frame.</td></tr>
+        <tr><td>Spiral</td><td>Outward spiral of wave rings.</td></tr>
+        <tr><td>Lissajous</td><td>Left vs right channel XY plot.</td></tr>
+        <tr><td>Phyllotaxis</td><td>Sunflower / golden-angle spiral.</td></tr>
+        <tr><td>Tube</td><td>Helix with radial wave ribs.</td></tr>
+        <tr><td>Terrain</td><td>Horizon-occluded ridges (Joy Division style).</td></tr>
+        <tr><td>Landscape</td><td>Terrain with opaque filled ridges and cross-lines.</td></tr>
+        <tr><td>Harmonograph</td><td>Two-pendulum parametric curve with damping.</td></tr>
+        <tr><td>Flow Field</td><td>Streamlines steered by frequency spectrum.</td></tr>
+        <tr><td>Epicycles</td><td>DFT arm snapshots per frame.</td></tr>
+        <tr><td>Chladni</td><td>Nodal-line patterns from resonance modes.</td></tr>
+        <tr><td>Moiré</td><td>Offset concentric rings producing moiré fringes.</td></tr>
+      </table>
+
+      <h3>Advanced — Data</h3>
+      <table>
+        <tr><td>Time</td><td>Raw waveform samples.</td></tr>
+        <tr><td>Frequency</td><td>FFT magnitude spectrum.</td></tr>
+        <tr><td>Stereo</td><td>Average of left and right channels.</td></tr>
+      </table>
+
+      <h3>Advanced — Noise</h3>
+      <table>
+        <tr><td>Type</td><td>Perlin fBm, Sine Sum, or White Noise.</td></tr>
+        <tr><td>Seed</td><td>Integer seed — same seed always produces the same pattern.</td></tr>
+        <tr><td>Speed</td><td>How fast the noise evolves over time.</td></tr>
+        <tr><td>Frequency</td><td>Spatial frequency of the noise field.</td></tr>
+        <tr><td>Octaves</td><td>Layers of detail (Perlin / Sine only).</td></tr>
+        <tr><td>Persistence</td><td>Amplitude falloff per octave (Perlin / Sine only).</td></tr>
+      </table>
+
+      <h3>Advanced — Settings</h3>
+      <table>
+        <tr><td>Max Frames</td><td>Frame count at which recording auto-stops (8–256).</td></tr>
+        <tr><td>Amp Scale</td><td>Vertical exaggeration of the waveform amplitude.</td></tr>
+        <tr><td>Speed (mm/min)</td><td>Plotter feed rate — affects G-code only, not the preview.</td></tr>
+        <tr><td>FFT Size</td><td>Audio analysis window size. Higher = more frequency detail.</td></tr>
+      </table>
+
+      <h3>Export</h3>
+      <p>The filename encodes the seed and camera position so any plot can be reproduced exactly. The same information is written as comments at the top of the G-code file.</p>
+      <p><strong>Anaglyph</strong> export generates a two-pass file (red pen then cyan pen) for red-cyan 3D glasses.</p>
+    </div>
+  </div>
 </body>
 </html>
