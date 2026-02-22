@@ -400,6 +400,7 @@ export function projectedPathsToGCode(paths, config = {}) {
   const penDownFeed = config.penDownFeedRate ?? 300;
   const penUpZ      = config.penUpZ          ?? 5;
   const penDownZ    = config.penDownZ        ?? 0;
+  const { sx, sy }  = _ndcScales(config.aspect ?? 1);
 
   const lines = [];
   const ts = new Date().toISOString();
@@ -419,12 +420,12 @@ export function projectedPathsToGCode(paths, config = {}) {
     if (path.length < 2) continue;
 
     // Map first point and rapid move to it (pen up).
-    const { px: x0, py: y0 } = _ndcToPaper(path[0].nx, path[0].ny);
+    const { px: x0, py: y0 } = _ndcToPaper(path[0].nx, path[0].ny, sx, sy);
     lines.push(`G0 X${f(x0)} Y${f(y0)}`);
     lines.push(`G1 Z${f(penDownZ)} F${penDownFeed}`);
 
     for (let i = 1; i < path.length; i++) {
-      const { px, py } = _ndcToPaper(path[i].nx, path[i].ny);
+      const { px, py } = _ndcToPaper(path[i].nx, path[i].ny, sx, sy);
       lines.push(`G1 X${f(px)} Y${f(py)} F${feedRate}`);
     }
 
@@ -456,6 +457,7 @@ export function stereoPathsToGCode(leftPaths, rightPaths, config = {}) {
   const penDownFeed = config.penDownFeedRate ?? 300;
   const penUpZ      = config.penUpZ          ?? 5;
   const penDownZ    = config.penDownZ        ?? 0;
+  const { sx, sy }  = _ndcScales(config.aspect ?? 1);
 
   const lines = [];
   const ts = new Date().toISOString();
@@ -476,11 +478,11 @@ export function stereoPathsToGCode(leftPaths, rightPaths, config = {}) {
   function _writePaths(paths) {
     for (const path of paths) {
       if (path.length < 2) continue;
-      const { px: x0, py: y0 } = _ndcToPaper(path[0].nx, path[0].ny);
+      const { px: x0, py: y0 } = _ndcToPaper(path[0].nx, path[0].ny, sx, sy);
       lines.push(`G0 X${f(x0)} Y${f(y0)}`);
       lines.push(`G1 Z${f(penDownZ)} F${penDownFeed}`);
       for (let i = 1; i < path.length; i++) {
-        const { px, py } = _ndcToPaper(path[i].nx, path[i].ny);
+        const { px, py } = _ndcToPaper(path[i].nx, path[i].ny, sx, sy);
         lines.push(`G1 X${f(px)} Y${f(py)} F${feedRate}`);
       }
       lines.push(`G0 Z${f(penUpZ)}`);
@@ -506,13 +508,29 @@ export function stereoPathsToGCode(leftPaths, rightPaths, config = {}) {
   return lines.join('\n');
 }
 
-// Map NDC (-1..+1) to paper coordinates (mm) using a uniform scale so that
-// aspect ratio is preserved.  The shorter axis (PLOT_W = 190 mm) is the
-// binding constraint; the output is centred on the paper.
-const NDC_SCALE = PLOT_W / 2;   // 95 mm per NDC unit (equal for x and y)
-function _ndcToPaper(nx, ny) {
-  const px = clampX(CENTER_X + nx *  NDC_SCALE);
-  const py = clampY(CENTER_Y + ny *  NDC_SCALE);
+// Compute half-extents (mm) for NDC → paper mapping that preserves the
+// viewport aspect ratio via a "contain" fit (like CSS object-fit: contain).
+// aspect = canvas_width / canvas_height (from camera.aspect).
+function _ndcScales(aspect = 1) {
+  const paperAspect = PLOT_W / PLOT_H;   // ~0.686 for A4 portrait
+  let sx, sy;
+  if (aspect >= paperAspect) {
+    // viewport is wider than paper → x fills PLOT_W, y is proportionally smaller
+    sx = PLOT_W / 2;
+    sy = sx / aspect;
+  } else {
+    // viewport is taller than paper → y fills PLOT_H, x is proportionally smaller
+    sy = PLOT_H / 2;
+    sx = sy * aspect;
+  }
+  return { sx, sy };
+}
+
+// Map NDC (-1..+1) to paper coordinates (mm), centred on the paper.
+// sx / sy are the half-extents in mm for each axis (from _ndcScales).
+function _ndcToPaper(nx, ny, sx, sy) {
+  const px = clampX(CENTER_X + nx * sx);
+  const py = clampY(CENTER_Y + ny * sy);
   return { px, py };
 }
 
