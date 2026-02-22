@@ -284,10 +284,18 @@ export function downloadGCode(content, filename) {
 /**
  * @param {'time'|'frequency'|'stereo'} dataMode
  * @param {'linear'|'circular'|'spiral'|'lissajous'} shape
+ * @param {number} [seed]  noise seed value
+ * @param {{position:[number,number,number], target:[number,number,number]}|null} [cam]
  * @returns {string}
  */
-export function generateFilename(dataMode, shape) {
-  return `wave-${shape}-${dataMode}-${Date.now()}.gcode`;
+export function generateFilename(dataMode, shape, seed, cam) {
+  const fmtV = v => Number.isInteger(v) ? String(v) : String(v).replace('.', 'p');
+  const fmtT = arr => arr.map(fmtV).join('_');
+
+  const seedPart = seed != null ? `-s${seed}` : '';
+  const camPart  = cam  ? `-p${fmtT(cam.position)}-t${fmtT(cam.target)}` : '';
+
+  return `wave-${shape}-${dataMode}${seedPart}${camPart}-${Date.now()}.gcode`;
 }
 
 /**
@@ -323,6 +331,12 @@ export function projectedPathsToGCode(paths, config = {}) {
   lines.push(`; Paths: ${paths.length} | Generated: ${ts}`);
   lines.push(`; Paper: A4 (${PAPER_W}x${PAPER_H}mm), ${MARGIN}mm margins`);
   lines.push(`; Plot area: ${PLOT_W} x ${PLOT_H} mm`);
+  if (config.seed   != null) lines.push(`; Seed: ${config.seed}`);
+  if (config.camera != null) {
+    const { position: [px, py, pz], target: [tx, ty, tz] } = config.camera;
+    lines.push(`; Camera position: ${px} ${py} ${pz}`);
+    lines.push(`; Camera target:   ${tx} ${ty} ${tz}`);
+  }
   lines.push(`G21          ; Units: millimetres`);
   lines.push(`G90          ; Absolute positioning`);
   lines.push(`G0 Z${f(penUpZ)}`);
@@ -379,6 +393,12 @@ export function stereoPathsToGCode(leftPaths, rightPaths, config = {}) {
   lines.push(`; Generated: ${ts}`);
   lines.push(`; Paper: A4 (${PAPER_W}x${PAPER_H}mm), ${MARGIN}mm margins`);
   lines.push(`; Pass 1 = RED pen (left eye)  |  Pass 2 = CYAN pen (right eye)`);
+  if (config.seed   != null) lines.push(`; Seed: ${config.seed}`);
+  if (config.camera != null) {
+    const { position: [px, py, pz], target: [tx, ty, tz] } = config.camera;
+    lines.push(`; Camera position: ${px} ${py} ${pz}`);
+    lines.push(`; Camera target:   ${tx} ${ty} ${tz}`);
+  }
   lines.push(`G21          ; Units: millimetres`);
   lines.push(`G90          ; Absolute positioning`);
   lines.push(`G0 Z${f(penUpZ)}`);

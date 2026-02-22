@@ -42,6 +42,11 @@ const noisePersVal     = document.getElementById('noise-pers-val');
 // Labels that only apply to perlin/sine (hidden for white noise)
 const noiseOctaveCtrl  = document.querySelectorAll('.noise-octave-ctrl');
 
+// Camera controls
+const cameraPosInput    = document.getElementById('camera-pos');
+const cameraTargetInput = document.getElementById('camera-target');
+const btnCameraSet      = document.getElementById('btn-camera-set');
+
 // ---------------------------------------------------------------------------
 // State
 // ---------------------------------------------------------------------------
@@ -180,14 +185,18 @@ btnExport.addEventListener('click', () => {
 
   const cfg   = getConfig();
   const paths = visualizer.getProjectedPaths();
+  const seed  = parseInt(noiseSeedInput.value) || 42;
+  const cam   = visualizer.getCameraState();
 
   const content = gcode.projectedPathsToGCode(paths, {
     feedRate:        cfg.feedRate,
     penDownFeedRate: 300,
     penUpZ:          5,
     penDownZ:        0,
+    seed,
+    camera: cam,
   });
-  const filename = gcode.generateFilename(currentMode, currentShape);
+  const filename = gcode.generateFilename(currentMode, currentShape, seed, cam);
   gcode.downloadGCode(content, filename);
 });
 
@@ -197,7 +206,9 @@ btnExport.addEventListener('click', () => {
 btnExportAnaglyph.addEventListener('click', () => {
   if (recorder.getFrameCount() === 0) return;
 
-  const cfg = getConfig();
+  const cfg  = getConfig();
+  const seed = parseInt(noiseSeedInput.value) || 42;
+  const cam  = visualizer.getCameraState();
   const { leftPaths, rightPaths } = visualizer.getStereoPaths(0.65);
 
   const content = gcode.stereoPathsToGCode(leftPaths, rightPaths, {
@@ -205,8 +216,10 @@ btnExportAnaglyph.addEventListener('click', () => {
     penDownFeedRate: 300,
     penUpZ:          5,
     penDownZ:        0,
+    seed,
+    camera: cam,
   });
-  const filename = gcode.generateFilename(currentMode, currentShape + '-anaglyph');
+  const filename = gcode.generateFilename(currentMode, currentShape + '-anaglyph', seed, cam);
   gcode.downloadGCode(content, filename);
 });
 
@@ -341,6 +354,28 @@ noisePersInput.addEventListener('input', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Camera controls
+// ---------------------------------------------------------------------------
+function _parseVec3(str) {
+  const parts = str.trim().split(/[\s,]+/).map(Number);
+  if (parts.length !== 3 || parts.some(isNaN)) return null;
+  return parts;
+}
+
+btnCameraSet.addEventListener('click', () => {
+  const pos = _parseVec3(cameraPosInput.value);
+  const tgt = _parseVec3(cameraTargetInput.value);
+  if (pos && tgt) visualizer.setCameraState(pos, tgt);
+});
+
+// Apply on Enter in either input
+[cameraPosInput, cameraTargetInput].forEach(el => {
+  el.addEventListener('keydown', e => {
+    if (e.key === 'Enter') btnCameraSet.click();
+  });
+});
+
+// ---------------------------------------------------------------------------
 // rAF loop — runs always once visualizer is initialised
 // ---------------------------------------------------------------------------
 function loop() {
@@ -372,6 +407,19 @@ function loop() {
     }
 
     tickCount++;
+  }
+
+  // Sync camera position inputs every ~30 frames, but not while the user is editing them.
+  if (tickCount % 30 === 0) {
+    const focused = document.activeElement;
+    if (focused !== cameraPosInput && focused !== cameraTargetInput) {
+      const cam = visualizer.getCameraState();
+      if (cam) {
+        const fmt = arr => arr.map(v => parseFloat(v.toFixed(2))).join(' ');
+        cameraPosInput.value    = fmt(cam.position);
+        cameraTargetInput.value = fmt(cam.target);
+      }
+    }
   }
 
   visualizer.render();
