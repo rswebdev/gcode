@@ -632,9 +632,32 @@ function _rebuildTerrain(allFrames, isLive) {
     yValues.push(ys);
   }
 
-  // ---- HORIZONTAL LINES (wave profiles, horizon-masked) ----
+  // ---- Screen-space (perspective-correct) horizon via camera VP matrix ----
+  // Project each world point through the camera to get NDC coordinates.
+  // The horizon buffer stores the highest NDC-Y seen so far at each screen-X bucket,
+  // which respects the camera's vanishing point instead of flat world-Y comparisons.
+  camera.updateMatrixWorld();
+  const vp = new THREE.Matrix4();
+  vp.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
+  const e = vp.elements;
+
+  function projectPt(x, y, z) {
+    const rx = e[0]*x + e[4]*y + e[8]*z  + e[12];
+    const ry = e[1]*x + e[5]*y + e[9]*z  + e[13];
+    const rw = e[3]*x + e[7]*y + e[11]*z + e[15];
+    if (rw <= 0.001) return null;
+    return { nx: rx / rw, ny: ry / rw };
+  }
+
+  const N_BUCKETS = 512;
+  // Map NDC X [-1, +1] to bucket indices
+  function ndcToB(nx) {
+    return Math.max(0, Math.min(N_BUCKETS - 1, Math.floor((nx + 1) * 0.5 * N_BUCKETS)));
+  }
+
+  // ---- HORIZONTAL LINES (wave profiles, perspective-correct horizon-masked) ----
   // Process newest→oldest so front frames set the horizon for back frames.
-  const horizonY = new Float32Array(N).fill(-1000);
+  const horizonNY = new Float32Array(N_BUCKETS).fill(-Infinity);
 
   for (let fi = F - 1; fi >= 0; fi--) {
     const ys = yValues[fi];
@@ -642,8 +665,10 @@ function _rebuildTerrain(allFrames, isLive) {
     let segPts = null;
 
     for (let i = 0; i < N; i++) {
-      const x = (i / (N - 1)) * SCENE_W - SCENE_W / 2;
-      if (ys[i] > horizonY[i]) {
+      const x  = (i / (N - 1)) * SCENE_W - SCENE_W / 2;
+      const pt = projectPt(x, ys[i], z);
+      const visible = pt && pt.ny >= horizonNY[ndcToB(pt.nx)];
+      if (visible) {
         if (!segPts) segPts = [];
         segPts.push(x, ys[i], z);
       } else {
@@ -660,33 +685,50 @@ function _rebuildTerrain(allFrames, isLive) {
       waveLines.push(line);
       scene.add(line);
     }
-    for (let i = 0; i < N; i++) if (ys[i] > horizonY[i]) horizonY[i] = ys[i];
+
+    // Update horizon: raise NDC-Y for each projected sample, interpolating between neighbours.
+    let prevPt = null;
+    for (let i = 0; i < N; i++) {
+      const x  = (i / (N - 1)) * SCENE_W - SCENE_W / 2;
+      const pt = projectPt(x, ys[i], z);
+      if (!pt) { prevPt = null; continue; }
+      const b = ndcToB(pt.nx);
+      if (pt.ny > horizonNY[b]) horizonNY[b] = pt.ny;
+      if (prevPt) {
+        const b0 = ndcToB(prevPt.nx), b1 = b;
+        const bMin = Math.min(b0, b1), bMax = Math.max(b0, b1);
+        for (let bi = bMin + 1; bi < bMax; bi++) {
+          const t  = (bi - bMin) / (bMax - bMin);
+          const iy = prevPt.ny + t * (pt.ny - prevPt.ny);
+          if (iy > horizonNY[bi]) horizonNY[bi] = iy;
+        }
+      }
+      prevPt = pt;
+    }
   }
 
-  // ---- PERPENDICULAR LINES (cross-sections along Z, horizon-masked per column) ----
-  // Spacing chosen so the count of vertical lines ≈ count of horizontal lines,
-  // giving a roughly square mesh cell.
+  // ---- PERPENDICULAR LINES (cross-sections along Z, perspective-correct horizon per column) ----
   const N_STEP = Math.max(4, Math.min(64, Math.round(N / Math.max(F, 4))));
 
   for (let si = 0; si < N; si += N_STEP) {
     const x = (si / (N - 1)) * SCENE_W - SCENE_W / 2;
-    // Per-column horizon: highest Y seen so far coming from the front (newest) frame.
-    let colHorizon = -1000;
+    // Per-column horizon in NDC-Y.
+    let colHorizonNY = -Infinity;
     let segPts = null;
 
-    // Walk newest→oldest (Z decreasing from camera perspective).
+    // Walk newest→oldest — front crests set the horizon for back columns.
     for (let fi = F - 1; fi >= 0; fi--) {
-      const y = yValues[fi][si];
-      const z = fi * zSpacing;
+      const y  = yValues[fi][si];
+      const z  = fi * zSpacing;
+      const pt = projectPt(x, y, z);
+      const ny = pt ? pt.ny : -Infinity;
 
-      if (y > colHorizon) {
+      if (ny >= colHorizonNY) {
         if (!segPts) segPts = [];
         segPts.push(x, y, z);
-        colHorizon = y;
+        if (ny > colHorizonNY) colHorizonNY = ny;
       } else {
-        if (segPts && segPts.length >= 6) {
-          _emitTerrainPerp(segPts, isLive);
-        }
+        if (segPts && segPts.length >= 6) _emitTerrainPerp(segPts, isLive);
         segPts = null;
       }
     }
@@ -941,29 +983,22 @@ function _rebuildLandscape(allFrames, isLive) {
     scene.add(line);
   }
 
-  // ---- PERPENDICULAR PASS: cross-sections along Z, horizon-masked per column ----
+  // ---- PERPENDICULAR PASS: full crest-connecting polylines along Z ----
+  // Draw full unmasked polylines connecting each frame's crest at each X column.
+  // Fills with polygonOffset push fills slightly behind lines at each Z plane, so
+  // lines appear on top visually. _getLandscapeProjectedPaths() handles screen-space
+  // horizon masking for G-code export.
   const N_STEP = Math.max(4, Math.min(64, Math.round(N / Math.max(F, 4))));
 
   for (let si = 0; si < N; si += N_STEP) {
-    const x = (si / (N - 1)) * SCENE_W - SCENE_W / 2;
-    let colHorizon = -1000;
-    let segPts     = null;
-
-    // Walk newest→oldest so nearer crests set the horizon for farther frames.
-    for (let fi = F - 1; fi >= 0; fi--) {
-      const y = yValues[fi][si];
-      const z = fi * zSpacing;
-
-      if (y > colHorizon) {
-        if (!segPts) segPts = [];
-        segPts.push(x, y, z);
-        colHorizon = y;
-      } else {
-        if (segPts && segPts.length >= 6) _emitLandscapePerp(segPts, isLive);
-        segPts = null;
-      }
+    const x   = (si / (N - 1)) * SCENE_W - SCENE_W / 2;
+    const pos = new Float32Array(F * 3);
+    for (let fi = 0; fi < F; fi++) {
+      pos[fi * 3]     = x;
+      pos[fi * 3 + 1] = yValues[fi][si];
+      pos[fi * 3 + 2] = fi * zSpacing;
     }
-    if (segPts && segPts.length >= 6) _emitLandscapePerp(segPts, isLive);
+    _emitLandscapePerp(pos, isLive);
   }
 }
 
