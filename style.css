@@ -267,6 +267,49 @@ output {
   border-color: #00d4ff44;
 }
 
+/* ---- Preset controls ---- */
+#btn-preset-save {
+  padding: 3px 10px;
+  font-size: 0.72em;
+  letter-spacing: 0.8px;
+  color: #aa8800;
+  border-color: #aa8800;
+  opacity: 0.6;
+}
+
+#btn-preset-save:hover:not(:disabled) {
+  background: #aa880022;
+  opacity: 1;
+}
+
+#btn-preset-save.active {
+  color: #ffd700;
+  border-color: #ffd700;
+  opacity: 1;
+}
+
+.btn-preset-clear {
+  padding: 3px 8px;
+  font-size: 0.72em;
+  letter-spacing: 0;
+  color: #555;
+  border-color: #333;
+  opacity: 0.5;
+}
+
+.btn-preset-clear:hover:not(:disabled) {
+  color: #ff4444;
+  border-color: #ff4444;
+  background: transparent;
+  opacity: 1;
+}
+
+#preset-indicator {
+  font-size: 0.85em;
+  color: #ffd700;
+  min-width: 12px;
+}
+
 /* ---- Help button ---- */
 #btn-help {
   margin-left: auto;
