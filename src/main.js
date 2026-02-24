@@ -49,6 +49,7 @@ const noiseOctaveCtrl  = document.querySelectorAll('.noise-octave-ctrl');
 const cameraPosInput    = document.getElementById('camera-pos');
 const cameraTargetInput = document.getElementById('camera-target');
 const btnCameraSet      = document.getElementById('btn-camera-set');
+const btnCameraReset    = document.getElementById('btn-camera-reset');
 
 // Advanced panel toggle
 const advancedPanel  = document.getElementById('advanced-panel');
@@ -390,6 +391,10 @@ btnCameraSet.addEventListener('click', () => {
   const pos = _parseVec3(cameraPosInput.value);
   const tgt = _parseVec3(cameraTargetInput.value);
   if (pos && tgt) visualizer.setCameraState(pos, tgt);
+});
+
+btnCameraReset.addEventListener('click', () => {
+  visualizer.resetCamera();
 });
 
 // Apply on Enter in either input
