@@ -74,6 +74,68 @@ const RAF_FPS         = 60;
 const RECORD_EVERY_N  = Math.round(RAF_FPS / RECORD_FPS);
 
 // ---------------------------------------------------------------------------
+// Per-source × per-shape defaults
+// Applied automatically whenever the user switches source or shape.
+// Keys map directly to DOM input IDs / JS state vars.
+// Only properties listed here are overridden; everything else is untouched.
+// ---------------------------------------------------------------------------
+const SHAPE_SOURCE_DEFAULTS = {
+  noise: {
+    // shape:       { noiseType, noiseSpeed, noiseFreq, noiseOct, noisePers, ampScale, maxFrames }
+    linear:       { noiseType: 'perlin', noiseSpeed: 0.005, noiseFreq: 2,   noiseOct: 4, noisePers: 0.5, ampScale: 2,   maxFrames: 64  },
+    terrain:      { noiseType: 'perlin', noiseSpeed: 0.005, noiseFreq: 2,   noiseOct: 4, noisePers: 0.5, ampScale: 2,   maxFrames: 64  },
+    landscape:    { noiseType: 'perlin', noiseSpeed: 0.005, noiseFreq: 2,   noiseOct: 4, noisePers: 0.5, ampScale: 2,   maxFrames: 64  },
+    circular:     { noiseType: 'perlin', noiseSpeed: 0.008, noiseFreq: 3,   noiseOct: 3, noisePers: 0.5, ampScale: 1.5, maxFrames: 32  },
+    spiral:       { noiseType: 'perlin', noiseSpeed: 0.004, noiseFreq: 2,   noiseOct: 4, noisePers: 0.6, ampScale: 0.8, maxFrames: 96  },
+    lissajous:    { noiseType: 'sine',   noiseSpeed: 0.01,  noiseFreq: 1.5, noiseOct: 3, noisePers: 0.5, ampScale: 6,   maxFrames: 32  },
+    phyllotaxis:  { noiseType: 'perlin', noiseSpeed: 0.006, noiseFreq: 2,   noiseOct: 4, noisePers: 0.5, ampScale: 0.8, maxFrames: 128 },
+    tube:         { noiseType: 'perlin', noiseSpeed: 0.005, noiseFreq: 3,   noiseOct: 4, noisePers: 0.5, ampScale: 2,   maxFrames: 48  },
+    harmonograph: { noiseType: 'perlin', noiseSpeed: 0.003, noiseFreq: 2,   noiseOct: 4, noisePers: 0.5, ampScale: 2,   maxFrames: 32  },
+    flowfield:    { noiseType: 'perlin', noiseSpeed: 0.005, noiseFreq: 2,   noiseOct: 3, noisePers: 0.5, ampScale: 1,   maxFrames: 48  },
+    epicycles:    { noiseType: 'perlin', noiseSpeed: 0.008, noiseFreq: 3,   noiseOct: 3, noisePers: 0.5, ampScale: 5,   maxFrames: 32  },
+    chladni:      { noiseType: 'perlin', noiseSpeed: 0.004, noiseFreq: 1,   noiseOct: 2, noisePers: 0.5, ampScale: 1,   maxFrames: 32  },
+    moire:        { noiseType: 'perlin', noiseSpeed: 0.005, noiseFreq: 2,   noiseOct: 3, noisePers: 0.5, ampScale: 1,   maxFrames: 32  },
+  },
+  mic: {
+    // Mic: raw audio peaks are large and fast-changing.
+    // Prefer frequency mode (smoother) for most shapes; lower ampScale.
+    // mode key sets the data mode select.
+    linear:       { ampScale: 1.2, maxFrames: 32,  mode: 'time'      },
+    terrain:      { ampScale: 1.2, maxFrames: 32,  mode: 'time'      },
+    landscape:    { ampScale: 1.2, maxFrames: 32,  mode: 'time'      },
+    circular:     { ampScale: 1.0, maxFrames: 32,  mode: 'frequency' },
+    spiral:       { ampScale: 0.5, maxFrames: 64,  mode: 'frequency' },
+    lissajous:    { ampScale: 5.0, maxFrames: 16,  mode: 'stereo'    },
+    phyllotaxis:  { ampScale: 0.4, maxFrames: 64,  mode: 'frequency' },
+    tube:         { ampScale: 1.5, maxFrames: 32,  mode: 'frequency' },
+    harmonograph: { ampScale: 1.5, maxFrames: 16,  mode: 'frequency' },
+    flowfield:    { ampScale: 1.0, maxFrames: 32,  mode: 'frequency' },
+    epicycles:    { ampScale: 3.0, maxFrames: 16,  mode: 'frequency' },
+    chladni:      { ampScale: 1.0, maxFrames: 16,  mode: 'frequency' },
+    moire:        { ampScale: 1.0, maxFrames: 32,  mode: 'time'      },
+  },
+};
+
+/**
+ * Apply default settings for the given source + shape combination.
+ * Only affects the parameters listed in the defaults table.
+ * Does NOT reset noise seed or camera.
+ */
+function _applyShapeSourceDefaults(source, shape) {
+  const d = (SHAPE_SOURCE_DEFAULTS[source] || {})[shape];
+  if (!d) return;
+
+  if (d.noiseType  != null) { noiseTypeSelect.value  = d.noiseType; _syncNoiseOctaveControls(); }
+  if (d.noiseSpeed != null) { noiseSpeedInput.value  = d.noiseSpeed; if (noiseSpeedVal) noiseSpeedVal.value = d.noiseSpeed; }
+  if (d.noiseFreq  != null) { noiseFreqInput.value   = d.noiseFreq;  if (noiseFreqVal)  noiseFreqVal.value  = d.noiseFreq; }
+  if (d.noiseOct   != null) { noiseOctInput.value    = d.noiseOct;   if (noiseOctVal)   noiseOctVal.value   = d.noiseOct; }
+  if (d.noisePers  != null) { noisePersInput.value   = d.noisePers;  if (noisePersVal)  noisePersVal.value  = d.noisePers; }
+  if (d.ampScale   != null) inputAmpScale.value  = d.ampScale;
+  if (d.maxFrames  != null) inputMaxFrames.value = d.maxFrames;
+  if (d.mode       != null) { modeSelect.value = d.mode; currentMode = d.mode; }
+}
+
+// ---------------------------------------------------------------------------
 // Config helper
 // ---------------------------------------------------------------------------
 function getConfig() {
@@ -292,6 +354,7 @@ shapeSelect.addEventListener('change', () => {
   if (newShape === currentShape) return;
 
   currentShape = newShape;
+  _applyShapeSourceDefaults(currentSource, newShape);
   recorder.reset();
   visualizer.setShape(newShape);
   btnExport.disabled = true;
@@ -317,8 +380,8 @@ sourceSelect.addEventListener('change', () => {
   // Show/hide noise panel
   noiseSection.classList.toggle('hidden', currentSource !== 'noise');
 
-  // Apply saved preset for this combo, if any
-  _applyPreset(currentSource, currentShape);
+  // Apply preset if saved for this combo; otherwise fall back to built-in defaults
+  _applyPreset(currentSource, currentShape) || _applyShapeSourceDefaults(currentSource, currentShape);
 
   // Pre-configure noise when switching to it so live preview starts immediately
   if (currentSource === 'noise') {
