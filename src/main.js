@@ -25,6 +25,9 @@ const btnHelpClose       = document.getElementById('btn-help-close');
 const sourceSelect  = document.getElementById('source-select');
 const modeSelect    = document.getElementById('mode-select');
 const shapeSelect   = document.getElementById('shape-select');
+const presetIndicator  = document.getElementById('preset-indicator');
+const btnPresetSave    = document.getElementById('btn-preset-save');
+const btnPresetClear   = document.getElementById('btn-preset-clear');
 const inputMaxFrames  = document.getElementById('setting-max-frames');
 const inputAmpScale   = document.getElementById('setting-amp-scale');
 const inputFeedRate   = document.getElementById('setting-feed-rate');
@@ -295,6 +298,11 @@ shapeSelect.addEventListener('change', () => {
   btnExportAnaglyph.disabled = true;
   frameCounter.textContent = '0 frames';
 
+  // Apply saved preset for this combo, if any
+  _applyPreset(currentSource, newShape);
+  if (currentSource === 'noise') _applyNoiseConfig();
+  _updatePresetUI();
+
   if (appState === 'STOPPED') {
     setAppState('IDLE');
   }
@@ -309,12 +317,17 @@ sourceSelect.addEventListener('change', () => {
   // Show/hide noise panel
   noiseSection.classList.toggle('hidden', currentSource !== 'noise');
 
+  // Apply saved preset for this combo, if any
+  _applyPreset(currentSource, currentShape);
+
   // Pre-configure noise when switching to it so live preview starts immediately
   if (currentSource === 'noise') {
     const cfg = getConfig();
     noise.configure({ ...getNoiseConfig(), fftSize: cfg.fftSize });
     noise.reset();
   }
+
+  _updatePresetUI();
 
   // Clear any recorded content — source change invalidates previous data
   recorder.reset();
@@ -554,6 +567,104 @@ function _loadSettings() {
 );
 
 // ---------------------------------------------------------------------------
+// Per-combination presets (localStorage)
+// Separate from session state — user must explicitly save/clear.
+// ---------------------------------------------------------------------------
+const PRESETS_KEY = 'gcode-viz-presets';
+
+function _presetKey() { return `${currentSource}:${currentShape}`; }
+
+function _getPresets() {
+  try { return JSON.parse(localStorage.getItem(PRESETS_KEY) || '{}'); } catch (_) { return {}; }
+}
+
+function _hasPreset(source, shape) {
+  return Object.prototype.hasOwnProperty.call(_getPresets(), `${source}:${shape}`);
+}
+
+/** Snapshot current settings and store as the preset for the active combo. */
+function _savePreset() {
+  const presets = _getPresets();
+  presets[_presetKey()] = {
+    mode:      modeSelect.value,
+    noiseType: noiseTypeSelect.value,
+    noiseSeed: noiseSeedInput.value,
+    noiseSpeed: noiseSpeedInput.value,
+    noiseFreq:  noiseFreqInput.value,
+    noiseOct:   noiseOctInput.value,
+    noisePers:  noisePersInput.value,
+    maxFrames:  inputMaxFrames.value,
+    ampScale:   inputAmpScale.value,
+    feedRate:   inputFeedRate.value,
+    fftSize:    inputFftSize.value,
+    cameraPos:  cameraPosInput.value,
+    cameraTgt:  cameraTargetInput.value,
+  };
+  try { localStorage.setItem(PRESETS_KEY, JSON.stringify(presets)); } catch (_) {}
+  _updatePresetUI();
+}
+
+/** Remove the saved preset for the active combo. */
+function _clearPreset() {
+  const presets = _getPresets();
+  delete presets[_presetKey()];
+  try { localStorage.setItem(PRESETS_KEY, JSON.stringify(presets)); } catch (_) {}
+  _updatePresetUI();
+}
+
+/**
+ * Apply the saved preset for a source+shape combo to the DOM.
+ * Returns true if a preset was found and applied, false otherwise.
+ */
+function _applyPreset(source, shape) {
+  const preset = _getPresets()[`${source}:${shape}`];
+  if (!preset) return false;
+
+  const apply = (el, v) => { if (v != null) el.value = v; };
+  apply(modeSelect,        preset.mode);
+  apply(noiseTypeSelect,   preset.noiseType);
+  apply(noiseSeedInput,    preset.noiseSeed);
+  apply(noiseSpeedInput,   preset.noiseSpeed);
+  apply(noiseFreqInput,    preset.noiseFreq);
+  apply(noiseOctInput,     preset.noiseOct);
+  apply(noisePersInput,    preset.noisePers);
+  apply(inputMaxFrames,    preset.maxFrames);
+  apply(inputAmpScale,     preset.ampScale);
+  apply(inputFeedRate,     preset.feedRate);
+  apply(inputFftSize,      preset.fftSize);
+  apply(cameraPosInput,    preset.cameraPos);
+  apply(cameraTargetInput, preset.cameraTgt);
+
+  if (preset.mode) currentMode = preset.mode;
+
+  // Sync visible state
+  _syncNoiseOctaveControls();
+  if (noiseSpeedVal) noiseSpeedVal.value = noiseSpeedInput.value;
+  if (noiseFreqVal)  noiseFreqVal.value  = noiseFreqInput.value;
+  if (noiseOctVal)   noiseOctVal.value   = noiseOctInput.value;
+  if (noisePersVal)  noisePersVal.value  = noisePersInput.value;
+
+  // Apply camera if visualizer is ready
+  const pos = _parseVec3(cameraPosInput.value);
+  const tgt = _parseVec3(cameraTargetInput.value);
+  if (pos && tgt && vizReady) visualizer.setCameraState(pos, tgt);
+
+  _saveSettings();  // persist the now-active preset settings as session state
+  return true;
+}
+
+/** Update the ★ indicator and Save button style for the current combo. */
+function _updatePresetUI() {
+  const has = _hasPreset(currentSource, currentShape);
+  presetIndicator.textContent = has ? '★' : '';
+  btnPresetSave.classList.toggle('active', has);
+  btnPresetClear.style.visibility = has ? 'visible' : 'hidden';
+}
+
+btnPresetSave.addEventListener('click', _savePreset);
+btnPresetClear.addEventListener('click', _clearPreset);
+
+// ---------------------------------------------------------------------------
 // Kick off rAF loop immediately (visualizer.init is called later on first
 // Record click to satisfy AudioContext user-gesture requirement).
 // Pre-init the visualizer with canvas so OrbitControls are available right away.
@@ -561,6 +672,8 @@ function _loadSettings() {
 window.addEventListener('DOMContentLoaded', () => {
   // Restore saved settings before init so getConfig() and currentShape reflect them.
   _loadSettings();
+  // Show preset indicator for the restored combo.
+  _updatePresetUI();
 
   // Pre-init the visualizer (no audio needed).
   visualizer.init(canvas, getConfig());
