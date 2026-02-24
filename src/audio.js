@@ -20,6 +20,13 @@ let rightBuf = null;
 const MIN_DB = -100;
 const MAX_DB = 0;
 
+let _smoothingFreq = 0.5;
+
+/** Set the smoothingTimeConstant used in frequency mode (0 = raw, 0.95 = very smooth). */
+export function setSmoothing(v) {
+  _smoothingFreq = Math.max(0, Math.min(0.95, v));
+}
+
 /**
  * Initialise microphone capture and AnalyserNodes.
  * Must be called inside a user-gesture handler.
@@ -84,7 +91,7 @@ export function getTimeFrame() {
  */
 export function getFrequencyFrame() {
   if (!analyser) return new Float32Array(0);
-  analyser.smoothingTimeConstant = 0.5;
+  analyser.smoothingTimeConstant = _smoothingFreq;
   analyser.getFloatFrequencyData(freqBuf);
   for (let i = 0; i < freqBuf.length; i++) {
     freqBuf[i] = Math.max(0, Math.min(1, (freqBuf[i] - MIN_DB) / (MAX_DB - MIN_DB)));
