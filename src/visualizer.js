@@ -332,6 +332,11 @@ export function getCameraAspect() {
  * @param {[number,number,number]} position
  * @param {[number,number,number]} target
  */
+/** Reset camera to the default position for the current shape. */
+export function resetCamera() {
+  _positionCameraForShape(shape);
+}
+
 export function setCameraState(position, target) {
   if (!camera || !controls) return;
   camera.position.set(...position);
