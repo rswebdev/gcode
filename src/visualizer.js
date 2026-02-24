@@ -103,6 +103,27 @@ export function updateConfig(config) {
 }
 
 /**
+ * Rebuild the full visualization from a set of previously recorded frames.
+ * Clears current geometry and re-runs the shape builder with the current
+ * config (so ampScale and other live settings are applied immediately).
+ * @param {Array<Float32Array | { left: Float32Array, right: Float32Array }>} frames
+ */
+export function replayFrames(frames) {
+  clearWaveLines();
+  if (!frames || frames.length === 0) return;
+
+  if (REBUILD_ALL_SHAPES.has(shape)) {
+    _rebuildAll(frames, false);
+  } else {
+    for (let i = 0; i < frames.length; i++) {
+      const lines = _buildPerFrameLines(frames[i], i, false);
+      for (const l of lines) { waveLines.push(l); scene.add(l); }
+    }
+    _updateOpacities();
+  }
+}
+
+/**
  * Add a newly recorded frame.
  * For REBUILD_ALL shapes, pass allFrames to reconstruct the full geometry.
  * @param {Float32Array | { left: Float32Array, right: Float32Array }} frameData
