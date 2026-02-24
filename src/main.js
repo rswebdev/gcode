@@ -17,6 +17,7 @@ const canvas             = document.getElementById('viz-canvas');
 const btnRecord          = document.getElementById('btn-record');
 const btnExport          = document.getElementById('btn-export');
 const btnExportAnaglyph  = document.getElementById('btn-export-anaglyph');
+const btnRerender        = document.getElementById('btn-rerender');
 const statusLabel        = document.getElementById('status-label');
 const frameCounter       = document.getElementById('frame-counter');
 const btnHelp            = document.getElementById('btn-help');
@@ -172,6 +173,7 @@ function setAppState(state) {
     btnRecord.classList.remove('recording');
     btnExport.disabled = true;
     btnExportAnaglyph.disabled = true;
+    btnRerender.disabled = true;
     modeSelect.disabled = false;
     shapeSelect.disabled = false;
     setInputsDisabled(false);
@@ -182,6 +184,7 @@ function setAppState(state) {
     btnRecord.classList.add('recording');
     btnExport.disabled = true;
     btnExportAnaglyph.disabled = true;
+    btnRerender.disabled = true;
     modeSelect.disabled = true;
     shapeSelect.disabled = true;
     setInputsDisabled(true);
@@ -190,8 +193,10 @@ function setAppState(state) {
   } else if (state === 'STOPPED') {
     btnRecord.textContent = 'Record';
     btnRecord.classList.remove('recording');
-    btnExport.disabled = recorder.getFrameCount() === 0;
-    btnExportAnaglyph.disabled = recorder.getFrameCount() === 0;
+    const hasFrames = recorder.getFrameCount() > 0;
+    btnExport.disabled = !hasFrames;
+    btnExportAnaglyph.disabled = !hasFrames;
+    btnRerender.disabled = !hasFrames;
     modeSelect.disabled = false;
     shapeSelect.disabled = false;
     setInputsDisabled(false);
@@ -314,6 +319,28 @@ btnExportAnaglyph.addEventListener('click', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Post-recording adjustment
+// ---------------------------------------------------------------------------
+
+/**
+ * Rebuild the 3D visualization from stored frames using current settings.
+ * Only meaningful in STOPPED state with captured frames.
+ */
+function _rerender() {
+  if (recorder.getFrameCount() === 0) return;
+  visualizer.updateConfig(getConfig());
+  visualizer.replayFrames(recorder.getFrames());
+}
+
+btnRerender.addEventListener('click', _rerender);
+
+// Reactive amp-scale: re-render immediately when slider moves in STOPPED state
+// so the user sees the effect before exporting.
+inputAmpScale.addEventListener('input', () => {
+  if (appState === 'STOPPED') _rerender();
+});
+
+// ---------------------------------------------------------------------------
 // Event: Data mode change
 // ---------------------------------------------------------------------------
 modeSelect.addEventListener('change', async () => {
@@ -355,19 +382,23 @@ shapeSelect.addEventListener('change', () => {
 
   currentShape = newShape;
   _applyShapeSourceDefaults(currentSource, newShape);
-  recorder.reset();
   visualizer.setShape(newShape);
-  btnExport.disabled = true;
-  btnExportAnaglyph.disabled = true;
-  frameCounter.textContent = '0 frames';
 
   // Apply saved preset for this combo, if any
   _applyPreset(currentSource, newShape);
   if (currentSource === 'noise') _applyNoiseConfig();
   _updatePresetUI();
 
-  if (appState === 'STOPPED') {
-    setAppState('IDLE');
+  if (appState === 'STOPPED' && recorder.getFrameCount() > 0) {
+    // Re-render existing frames in the new shape — no re-recording needed.
+    _rerender();
+  } else {
+    recorder.reset();
+    btnExport.disabled = true;
+    btnExportAnaglyph.disabled = true;
+    btnRerender.disabled = true;
+    frameCounter.textContent = '0 frames';
+    if (appState === 'STOPPED') setAppState('IDLE');
   }
 });
 
