@@ -479,15 +479,99 @@ function loop() {
 }
 
 // ---------------------------------------------------------------------------
+// Settings persistence (localStorage)
+// ---------------------------------------------------------------------------
+const SETTINGS_KEY = 'gcode-viz';
+
+function _saveSettings() {
+  try {
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify({
+      source:    sourceSelect.value,
+      shape:     shapeSelect.value,
+      mode:      modeSelect.value,
+      noiseType: noiseTypeSelect.value,
+      noiseSeed: noiseSeedInput.value,
+      noiseSpeed: noiseSpeedInput.value,
+      noiseFreq:  noiseFreqInput.value,
+      noiseOct:   noiseOctInput.value,
+      noisePers:  noisePersInput.value,
+      maxFrames:  inputMaxFrames.value,
+      ampScale:   inputAmpScale.value,
+      feedRate:   inputFeedRate.value,
+      fftSize:    inputFftSize.value,
+      cameraPos:  cameraPosInput.value,
+      cameraTgt:  cameraTargetInput.value,
+    }));
+  } catch (_) { /* private browsing / quota */ }
+}
+
+function _loadSettings() {
+  let s;
+  try {
+    const raw = localStorage.getItem(SETTINGS_KEY);
+    if (!raw) return;
+    s = JSON.parse(raw);
+  } catch (_) { return; }
+
+  const apply = (el, v) => { if (v != null) el.value = v; };
+  apply(sourceSelect,      s.source);
+  apply(shapeSelect,       s.shape);
+  apply(modeSelect,        s.mode);
+  apply(noiseTypeSelect,   s.noiseType);
+  apply(noiseSeedInput,    s.noiseSeed);
+  apply(noiseSpeedInput,   s.noiseSpeed);
+  apply(noiseFreqInput,    s.noiseFreq);
+  apply(noiseOctInput,     s.noiseOct);
+  apply(noisePersInput,    s.noisePers);
+  apply(inputMaxFrames,    s.maxFrames);
+  apply(inputAmpScale,     s.ampScale);
+  apply(inputFeedRate,     s.feedRate);
+  apply(inputFftSize,      s.fftSize);
+  apply(cameraPosInput,    s.cameraPos);
+  apply(cameraTargetInput, s.cameraTgt);
+
+  // Sync JS state variables to restored values
+  if (s.source) currentSource = s.source;
+  if (s.shape)  currentShape  = s.shape;
+  if (s.mode)   currentMode   = s.mode;
+
+  // Sync conditional UI visibility
+  noiseSection.classList.toggle('hidden', currentSource !== 'noise');
+  _syncNoiseOctaveControls();
+
+  // Sync output display elements for range sliders
+  if (noiseSpeedVal) noiseSpeedVal.value = noiseSpeedInput.value;
+  if (noiseFreqVal)  noiseFreqVal.value  = noiseFreqInput.value;
+  if (noiseOctVal)   noiseOctVal.value   = noiseOctInput.value;
+  if (noisePersVal)  noisePersVal.value  = noisePersInput.value;
+}
+
+// Save on any input or select change (event delegation — covers all controls).
+['change', 'input'].forEach(evt =>
+  document.addEventListener(evt, e => {
+    if (e.target.matches('input, select')) _saveSettings();
+  })
+);
+
+// ---------------------------------------------------------------------------
 // Kick off rAF loop immediately (visualizer.init is called later on first
 // Record click to satisfy AudioContext user-gesture requirement).
 // Pre-init the visualizer with canvas so OrbitControls are available right away.
 // ---------------------------------------------------------------------------
 window.addEventListener('DOMContentLoaded', () => {
+  // Restore saved settings before init so getConfig() and currentShape reflect them.
+  _loadSettings();
+
   // Pre-init the visualizer (no audio needed).
   visualizer.init(canvas, getConfig());
-  // Apply default shape so camera is positioned correctly from the start.
+  // Apply saved/default shape — positions camera to shape default.
   visualizer.setShape(currentShape);
+
+  // If the user had a custom camera saved, apply it now (overrides shape default).
+  const savedPos = _parseVec3(cameraPosInput.value);
+  const savedTgt = _parseVec3(cameraTargetInput.value);
+  if (savedPos && savedTgt) visualizer.setCameraState(savedPos, savedTgt);
+
   vizReady = true;
   setAppState('IDLE');
 
