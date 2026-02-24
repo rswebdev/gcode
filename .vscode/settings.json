@@ -1,6 +1,10 @@
 {
     "chat.tools.terminal.autoApprove": {
         "git add": true,
+        "git rebase": true,
+        "git merge": true,
+        "git status": true,
+        "git stash": true,
         "git commit": true
     }
 }
