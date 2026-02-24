@@ -33,6 +33,11 @@ const inputMaxFrames  = document.getElementById('setting-max-frames');
 const inputAmpScale   = document.getElementById('setting-amp-scale');
 const inputFeedRate   = document.getElementById('setting-feed-rate');
 const inputFftSize    = document.getElementById('setting-fft-size');
+const inputRecordFps  = document.getElementById('setting-record-fps');
+const inputSmoothing  = document.getElementById('setting-smoothing');
+
+// Labels that only show when source = mic
+const micOnlyCtrls    = document.querySelectorAll('.mic-only-ctrl');
 
 // Noise controls
 const noiseSection     = document.getElementById('controls-noise');
@@ -70,9 +75,7 @@ let audioReady  = false;
 let vizReady    = false;
 let tickCount   = 0;
 
-const RECORD_FPS      = 10;
-const RAF_FPS         = 60;
-const RECORD_EVERY_N  = Math.round(RAF_FPS / RECORD_FPS);
+const RAF_FPS = 60;
 
 // ---------------------------------------------------------------------------
 // Per-source × per-shape defaults
@@ -144,9 +147,10 @@ function getConfig() {
   const ampScale   = Math.max(0.1, Math.min(10,  parseFloat(inputAmpScale.value) || 2.0));
   const feedRate   = Math.max(100, Math.min(10000, parseInt(inputFeedRate.value)  || 3000));
   const fftSize    = Math.max(32,  Math.min(2048, parseInt(inputFftSize.value)    || 512));
+  const recordFps  = Math.max(1,   Math.min(30,   parseFloat(inputRecordFps.value) || 10));
   // Amplitude scale in mm: each row gets rowSpacing * 0.45 * ampScale mm of swing.
   // We pass ampScale directly; gcode.js computes rowSpacing internally.
-  return { maxFrames, ampScale, feedRate, fftSize, amplitudeScaleMm: ampScale };
+  return { maxFrames, ampScale, feedRate, fftSize, recordFps, amplitudeScaleMm: ampScale };
 }
 
 /** Read current noise-parameter inputs. */
@@ -210,6 +214,8 @@ function setInputsDisabled(disabled) {
   inputAmpScale.disabled  = disabled;
   inputFeedRate.disabled  = disabled;
   inputFftSize.disabled   = disabled;
+  inputRecordFps.disabled = disabled;
+  inputSmoothing.disabled = disabled;
 }
 
 // ---------------------------------------------------------------------------
@@ -410,6 +416,7 @@ sourceSelect.addEventListener('change', () => {
 
   // Show/hide noise panel
   noiseSection.classList.toggle('hidden', currentSource !== 'noise');
+  micOnlyCtrls.forEach(el => el.classList.toggle('hidden', currentSource !== 'mic'));
 
   // Apply preset if saved for this combo; otherwise fall back to built-in defaults
   _applyPreset(currentSource, currentShape) || _applyShapeSourceDefaults(currentSource, currentShape);
@@ -485,6 +492,11 @@ noisePersInput.addEventListener('input', () => {
   _applyNoiseConfig();
 });
 
+// Smoothing — mic frequency mode only
+inputSmoothing.addEventListener('input', () => {
+  audio.setSmoothing(parseFloat(inputSmoothing.value));
+});
+
 // ---------------------------------------------------------------------------
 // Camera controls
 // ---------------------------------------------------------------------------
@@ -551,7 +563,8 @@ function loop() {
     visualizer.updateLiveLine(frame, allFrames, recorder.getFrameCount());
 
     // Record at throttled rate.
-    if (recorder.isRecording() && tickCount % RECORD_EVERY_N === 0) {
+    const recordEveryN = Math.max(1, Math.round(RAF_FPS / (parseFloat(inputRecordFps.value) || 10)));
+    if (recorder.isRecording() && tickCount % recordEveryN === 0) {
       recorder.addFrame(frame);
       const count = recorder.getFrameCount();
       const cfg   = getConfig();
@@ -606,6 +619,8 @@ function _saveSettings() {
       ampScale:   inputAmpScale.value,
       feedRate:   inputFeedRate.value,
       fftSize:    inputFftSize.value,
+      recordFps:  inputRecordFps.value,
+      smoothing:  inputSmoothing.value,
       cameraPos:  cameraPosInput.value,
       cameraTgt:  cameraTargetInput.value,
     }));
@@ -634,6 +649,8 @@ function _loadSettings() {
   apply(inputAmpScale,     s.ampScale);
   apply(inputFeedRate,     s.feedRate);
   apply(inputFftSize,      s.fftSize);
+  apply(inputRecordFps,    s.recordFps);
+  apply(inputSmoothing,    s.smoothing);
   apply(cameraPosInput,    s.cameraPos);
   apply(cameraTargetInput, s.cameraTgt);
 
@@ -642,8 +659,12 @@ function _loadSettings() {
   if (s.shape)  currentShape  = s.shape;
   if (s.mode)   currentMode   = s.mode;
 
+  // Apply restored smoothing to audio module
+  if (s.smoothing != null) audio.setSmoothing(parseFloat(s.smoothing));
+
   // Sync conditional UI visibility
   noiseSection.classList.toggle('hidden', currentSource !== 'noise');
+  micOnlyCtrls.forEach(el => el.classList.toggle('hidden', currentSource !== 'mic'));
   _syncNoiseOctaveControls();
 
   // Sync output display elements for range sliders
@@ -691,6 +712,8 @@ function _savePreset() {
     ampScale:   inputAmpScale.value,
     feedRate:   inputFeedRate.value,
     fftSize:    inputFftSize.value,
+    recordFps:  inputRecordFps.value,
+    smoothing:  inputSmoothing.value,
     cameraPos:  cameraPosInput.value,
     cameraTgt:  cameraTargetInput.value,
   };
@@ -726,10 +749,13 @@ function _applyPreset(source, shape) {
   apply(inputAmpScale,     preset.ampScale);
   apply(inputFeedRate,     preset.feedRate);
   apply(inputFftSize,      preset.fftSize);
+  apply(inputRecordFps,    preset.recordFps);
+  apply(inputSmoothing,    preset.smoothing);
   apply(cameraPosInput,    preset.cameraPos);
   apply(cameraTargetInput, preset.cameraTgt);
 
   if (preset.mode) currentMode = preset.mode;
+  if (preset.smoothing != null) audio.setSmoothing(parseFloat(preset.smoothing));
 
   // Sync visible state
   _syncNoiseOctaveControls();
@@ -766,6 +792,8 @@ btnPresetClear.addEventListener('click', _clearPreset);
 window.addEventListener('DOMContentLoaded', () => {
   // Restore saved settings before init so getConfig() and currentShape reflect them.
   _loadSettings();
+  // Ensure mic-only controls match initial source (handles fresh session with no saved state).
+  micOnlyCtrls.forEach(el => el.classList.toggle('hidden', currentSource !== 'mic'));
   // Show preset indicator for the restored combo.
   _updatePresetUI();
 

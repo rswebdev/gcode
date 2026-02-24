@@ -116,6 +116,14 @@
           FFT Size
           <input id="setting-fft-size" type="number" value="512" min="32" max="2048" step="32">
         </label>
+        <label>
+          Record FPS
+          <input id="setting-record-fps" type="number" value="10" min="1" max="30" step="1">
+        </label>
+        <label class="mic-only-ctrl">
+          Smoothing
+          <input id="setting-smoothing" type="number" value="0.5" min="0" max="0.95" step="0.05">
+        </label>
       </section>
 
       <section id="controls-camera">
@@ -143,7 +151,7 @@
       <h3>Workflow</h3>
       <ol>
         <li>Choose a <strong>Source</strong> (microphone or noise) and a <strong>Shape</strong>.</li>
-        <li>Click <strong>Record</strong> — captures frames at 10 fps, auto-stops at Max Frames.</li>
+        <li>Click <strong>Record</strong> — captures frames at the configured Record FPS, auto-stops at Max Frames.</li>
         <li>Orbit the 3D view with the mouse, then click <strong>Export G-code</strong>.</li>
         <li>The exported file contains the current camera view — move the camera first to frame the plot you want.</li>
       </ol>
@@ -202,6 +210,8 @@
         <tr><td>Amp Scale</td><td>Vertical exaggeration of the waveform amplitude.</td></tr>
         <tr><td>Speed (mm/min)</td><td>Plotter feed rate — affects G-code only, not the preview.</td></tr>
         <tr><td>FFT Size</td><td>Audio analysis window size. Higher = more frequency detail.</td></tr>
+        <tr><td>Record FPS</td><td>Frames captured per second (1–30). Lower = slower temporal evolution in the plot.</td></tr>
+        <tr><td>Smoothing</td><td>Mic frequency-mode averaging (0 = raw, 0.95 = very smooth). Hidden when using Noise source.</td></tr>
       </table>
 
       <h3>Export</h3>
