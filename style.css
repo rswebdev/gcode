@@ -418,3 +418,200 @@ output {
 #help-content strong {
   color: #ccc;
 }
+
+/* ---- Plotter controls ---- */
+#controls-plotter {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  border-left: 1px solid #1a2e1a;
+  padding-left: 16px;
+}
+
+.plotter-group {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  align-items: flex-start;
+}
+
+.plotter-label {
+  font-size: 0.62em;
+  color: #4a6a4a;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  margin-bottom: 1px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.plotter-label select {
+  min-width: 80px;
+  font-size: 1.1em;
+}
+
+.plotter-checkbox {
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+
+.plotter-checkbox input[type="checkbox"] {
+  accent-color: #44bb44;
+  width: 13px;
+  height: 13px;
+  cursor: pointer;
+}
+
+#jog-xy {
+  display: grid;
+  grid-template-columns: repeat(3, 30px);
+  grid-template-rows: repeat(3, 26px);
+  gap: 3px;
+}
+
+.jog-btn {
+  padding: 2px 4px;
+  font-size: 0.65em;
+  letter-spacing: 0.5px;
+  min-width: 30px;
+  height: 26px;
+}
+
+/* ---- Serial Monitor ---- */
+#serial-monitor {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: rgba(5, 5, 10, 0.96);
+  border-top: 1px solid #1a2e1a;
+  display: flex;
+  flex-direction: column;
+  z-index: 50;
+  max-height: 280px;
+}
+
+#monitor-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 5px 12px;
+  border-bottom: 1px solid #111;
+  flex-shrink: 0;
+}
+
+#monitor-title {
+  font-size: 0.7em;
+  color: #4a6a4a;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  flex: 1;
+}
+
+#monitor-conn-status {
+  font-size: 0.65em;
+  color: #3a5a3a;
+  letter-spacing: 0.5px;
+}
+
+#monitor-conn-status.connected {
+  color: #44bb44;
+}
+
+#btn-monitor-clear {
+  padding: 2px 8px;
+  font-size: 0.65em;
+  letter-spacing: 0.5px;
+  color: #555;
+  border-color: #333;
+  opacity: 0.6;
+}
+
+#btn-monitor-clear:hover:not(:disabled) {
+  color: #ccc;
+  border-color: #555;
+  background: transparent;
+  opacity: 1;
+}
+
+#btn-monitor-close {
+  padding: 2px 8px;
+  font-size: 0.9em;
+  letter-spacing: 0;
+  color: #555;
+  border-color: #333;
+  opacity: 0.5;
+}
+
+#btn-monitor-close:hover {
+  color: #ff4444;
+  border-color: #ff4444;
+  background: transparent;
+  opacity: 1;
+}
+
+#monitor-log {
+  flex: 1;
+  overflow-y: auto;
+  padding: 6px 12px;
+  font-size: 0.72em;
+  line-height: 1.55;
+  min-height: 100px;
+  max-height: 200px;
+  scrollbar-width: thin;
+  scrollbar-color: #1a2e1a transparent;
+}
+
+#monitor-log::-webkit-scrollbar       { width: 5px; }
+#monitor-log::-webkit-scrollbar-track { background: transparent; }
+#monitor-log::-webkit-scrollbar-thumb { background: #1a2e1a; border-radius: 3px; }
+
+.monitor-line {
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.monitor-tx   { color: #00d4ff; }
+.monitor-rx   { color: #44bb44; }
+.monitor-info { color: #556; font-style: italic; }
+.monitor-rx.monitor-ok   { opacity: 0.3; }
+.monitor-rx.monitor-err  { color: #ff4444; }
+
+#monitor-send-row {
+  display: flex;
+  gap: 6px;
+  padding: 6px 12px;
+  border-top: 1px solid #111;
+  flex-shrink: 0;
+}
+
+#monitor-input {
+  flex: 1;
+  width: auto;
+  background: #0a0a0a;
+  border-color: #1a2e1a;
+  color: #00d4ff;
+  font-size: 0.8em;
+  padding: 4px 8px;
+}
+
+#monitor-input:focus {
+  border-color: #44bb44;
+  outline: none;
+}
+
+#btn-monitor-send {
+  padding: 4px 14px;
+  font-size: 0.72em;
+}
+
+/* Active state for the Monitor toggle button */
+#btn-monitor-toggle.active {
+  background: #001a00;
+  color: #44bb44;
+  border-color: #44bb44;
+}

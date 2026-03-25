@@ -9,6 +9,7 @@ import * as recorder   from './recorder.js';
 import * as visualizer from './visualizer.js';
 import * as gcode      from './gcode.js';
 import * as noise      from './noise.js';
+import * as serial     from './serial.js';
 
 // ---------------------------------------------------------------------------
 // DOM refs
@@ -17,6 +18,7 @@ const canvas             = document.getElementById('viz-canvas');
 const btnRecord          = document.getElementById('btn-record');
 const btnExport          = document.getElementById('btn-export');
 const btnExportAnaglyph  = document.getElementById('btn-export-anaglyph');
+const btnSerialSend      = document.getElementById('btn-serial-send');
 const btnRerender        = document.getElementById('btn-rerender');
 const statusLabel        = document.getElementById('status-label');
 const frameCounter       = document.getElementById('frame-counter');
@@ -32,9 +34,47 @@ const btnPresetClear   = document.getElementById('btn-preset-clear');
 const inputMaxFrames  = document.getElementById('setting-max-frames');
 const inputAmpScale   = document.getElementById('setting-amp-scale');
 const inputFeedRate   = document.getElementById('setting-feed-rate');
+const inputPenUpZ     = document.getElementById('setting-pen-up-z');
+const inputPenDownZ   = document.getElementById('setting-pen-down-z');
+const inputPenMode    = document.getElementById('setting-pen-mode');
+const inputPenUpS     = document.getElementById('setting-pen-up-s');
+const inputPenDownS   = document.getElementById('setting-pen-down-s');
+const zUpCtrl         = document.getElementById('z-up-ctrl');
+const zDownCtrl       = document.getElementById('z-down-ctrl');
+const servoUpCtrl     = document.getElementById('servo-up-ctrl');
+const servoDownCtrl   = document.getElementById('servo-down-ctrl');
 const inputFftSize    = document.getElementById('setting-fft-size');
 const inputRecordFps  = document.getElementById('setting-record-fps');
 const inputSmoothing  = document.getElementById('setting-smoothing');
+
+// Plotter machine controls
+const btnPlotterHome    = document.getElementById('btn-plotter-home');
+const btnPlotterZeroXY  = document.getElementById('btn-plotter-zero-xy');
+const btnPlotterZeroZ   = document.getElementById('btn-plotter-zero-z');
+const btnPlotterPenUp   = document.getElementById('btn-plotter-pen-up');
+const btnPlotterPenDown = document.getElementById('btn-plotter-pen-down');
+const btnServoSweep     = document.getElementById('btn-servo-sweep');
+
+// Jog controls
+const jogStepSelect = document.getElementById('jog-step');
+const jogSwapXY     = document.getElementById('jog-swap-xy');
+const jogCoreXY     = document.getElementById('jog-corexy');
+const btnJogXP = document.getElementById('btn-jog-xp');
+const btnJogXM = document.getElementById('btn-jog-xm');
+const btnJogYP = document.getElementById('btn-jog-yp');
+const btnJogYM = document.getElementById('btn-jog-ym');
+const btnJogZP = document.getElementById('btn-jog-zp');
+const btnJogZM = document.getElementById('btn-jog-zm');
+
+// Serial monitor
+const btnMonitorToggle  = document.getElementById('btn-monitor-toggle');
+const serialMonitor     = document.getElementById('serial-monitor');
+const monitorLog        = document.getElementById('monitor-log');
+const monitorInput      = document.getElementById('monitor-input');
+const monitorConnStatus = document.getElementById('monitor-conn-status');
+const btnMonitorClear   = document.getElementById('btn-monitor-clear');
+const btnMonitorClose   = document.getElementById('btn-monitor-close');
+const btnMonitorSend    = document.getElementById('btn-monitor-send');
 
 // Labels that only show when source = mic
 const micOnlyCtrls    = document.querySelectorAll('.mic-only-ctrl');
@@ -99,6 +139,7 @@ const SHAPE_SOURCE_DEFAULTS = {
     epicycles:    { noiseType: 'perlin', noiseSpeed: 0.008, noiseFreq: 3,   noiseOct: 3, noisePers: 0.5, ampScale: 5,   maxFrames: 32  },
     chladni:      { noiseType: 'perlin', noiseSpeed: 0.004, noiseFreq: 1,   noiseOct: 2, noisePers: 0.5, ampScale: 1,   maxFrames: 32  },
     moire:        { noiseType: 'perlin', noiseSpeed: 0.005, noiseFreq: 2,   noiseOct: 3, noisePers: 0.5, ampScale: 1,   maxFrames: 32  },
+    heatmap:      { noiseType: 'perlin', noiseSpeed: 0.005, noiseFreq: 2,   noiseOct: 4, noisePers: 0.5, ampScale: 1,   maxFrames: 48  },
   },
   mic: {
     // Mic: raw audio peaks are large and fast-changing.
@@ -117,6 +158,7 @@ const SHAPE_SOURCE_DEFAULTS = {
     epicycles:    { ampScale: 3.0, maxFrames: 16,  mode: 'frequency' },
     chladni:      { ampScale: 1.0, maxFrames: 16,  mode: 'frequency' },
     moire:        { ampScale: 1.0, maxFrames: 32,  mode: 'time'      },
+    heatmap:      { ampScale: 1.0, maxFrames: 32,  mode: 'frequency' },
   },
 };
 
@@ -146,11 +188,14 @@ function getConfig() {
   const maxFrames  = Math.max(8,   Math.min(256, parseInt(inputMaxFrames.value)  || 64));
   const ampScale   = Math.max(0.1, Math.min(10,  parseFloat(inputAmpScale.value) || 2.0));
   const feedRate   = Math.max(100, Math.min(10000, parseInt(inputFeedRate.value)  || 3000));
+  const penUpZ     = Math.max(-20, Math.min(20,  parseFloat(inputPenUpZ.value)   ?? 5));
+  const penDownZ   = Math.max(-20, Math.min(20,  parseFloat(inputPenDownZ.value) ?? 0));
+  const penMode    = inputPenMode.value || 'z';
+  const penUpS     = Math.max(0, Math.min(1000, parseInt(inputPenUpS.value)   || 80));
+  const penDownS   = Math.max(0, Math.min(1000, parseInt(inputPenDownS.value) || 50));
   const fftSize    = Math.max(32,  Math.min(2048, parseInt(inputFftSize.value)    || 512));
   const recordFps  = Math.max(1,   Math.min(30,   parseFloat(inputRecordFps.value) || 10));
-  // Amplitude scale in mm: each row gets rowSpacing * 0.45 * ampScale mm of swing.
-  // We pass ampScale directly; gcode.js computes rowSpacing internally.
-  return { maxFrames, ampScale, feedRate, fftSize, recordFps, amplitudeScaleMm: ampScale };
+  return { maxFrames, ampScale, feedRate, penUpZ, penDownZ, penMode, penUpS, penDownS, fftSize, recordFps, amplitudeScaleMm: ampScale, coreXY: jogCoreXY.checked };
 }
 
 /** Read current noise-parameter inputs. */
@@ -177,6 +222,7 @@ function setAppState(state) {
     btnRecord.classList.remove('recording');
     btnExport.disabled = true;
     btnExportAnaglyph.disabled = true;
+    btnSerialSend.disabled = true;
     btnRerender.disabled = true;
     modeSelect.disabled = false;
     shapeSelect.disabled = false;
@@ -188,6 +234,7 @@ function setAppState(state) {
     btnRecord.classList.add('recording');
     btnExport.disabled = true;
     btnExportAnaglyph.disabled = true;
+    btnSerialSend.disabled = true;
     btnRerender.disabled = true;
     modeSelect.disabled = true;
     shapeSelect.disabled = true;
@@ -200,6 +247,7 @@ function setAppState(state) {
     const hasFrames = recorder.getFrameCount() > 0;
     btnExport.disabled = !hasFrames;
     btnExportAnaglyph.disabled = !hasFrames;
+    btnSerialSend.disabled = !hasFrames || !serial.isAvailable();
     btnRerender.disabled = !hasFrames;
     modeSelect.disabled = false;
     shapeSelect.disabled = false;
@@ -213,6 +261,8 @@ function setInputsDisabled(disabled) {
   inputMaxFrames.disabled = disabled;
   inputAmpScale.disabled  = disabled;
   inputFeedRate.disabled  = disabled;
+  inputPenUpZ.disabled    = disabled;
+  inputPenDownZ.disabled  = disabled;
   inputFftSize.disabled   = disabled;
   inputRecordFps.disabled = disabled;
   inputSmoothing.disabled = disabled;
@@ -280,6 +330,12 @@ function _buildExportParams() {
     ampScale:   cfg.ampScale,
     fftSize:    cfg.fftSize,
     feedRate:   cfg.feedRate,
+    penUpZ:     cfg.penUpZ,
+    penDownZ:   cfg.penDownZ,
+    penMode:    cfg.penMode,
+    penUpS:     cfg.penUpS,
+    penDownS:   cfg.penDownS,
+    coreXY:     cfg.coreXY,
     camera:     visualizer.getCameraState(),
   };
 }
@@ -296,8 +352,12 @@ btnExport.addEventListener('click', () => {
   const content = gcode.projectedPathsToGCode(paths, {
     feedRate:        params.feedRate,
     penDownFeedRate: 300,
-    penUpZ:          5,
-    penDownZ:        0,
+    penUpZ:          params.penUpZ,
+    penDownZ:        params.penDownZ,
+    penMode:         params.penMode,
+    penUpS:          params.penUpS,
+    penDownS:        params.penDownS,
+    coreXY:          params.coreXY,
     aspect:          visualizer.getCameraAspect(),
     params,
   });
@@ -316,8 +376,12 @@ btnExportAnaglyph.addEventListener('click', () => {
   const content = gcode.stereoPathsToGCode(leftPaths, rightPaths, {
     feedRate:        params.feedRate,
     penDownFeedRate: 300,
-    penUpZ:          5,
-    penDownZ:        0,
+    penUpZ:          params.penUpZ,
+    penDownZ:        params.penDownZ,
+    penMode:         params.penMode,
+    penUpS:          params.penUpS,
+    penDownS:        params.penDownS,
+    coreXY:          params.coreXY,
     aspect:          visualizer.getCameraAspect(),
     params,
   });
@@ -325,9 +389,315 @@ btnExportAnaglyph.addEventListener('click', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Post-recording adjustment
+// Event: Send to Plotter button (Web Serial → GRBL)
+// ---------------------------------------------------------------------------
+btnSerialSend.addEventListener('click', async () => {
+  // If currently sending, cancel and stop.
+  if (serial.isSending()) {
+    serial.cancelSend();
+    return;
+  }
+
+  if (recorder.getFrameCount() === 0) return;
+
+  // Connect if not already open.
+  if (!serial.isConnected()) {
+    try {
+      statusLabel.textContent = 'Connecting to plotter…';
+      statusLabel.className   = 'active';
+      await serial.connect();
+    } catch (err) {
+      // User cancelled the port picker or the port failed to open.
+      const msg = err?.message ?? String(err);
+      statusLabel.textContent = msg.includes('No port selected') ? 'No port selected' : `Connect failed: ${msg}`;
+      statusLabel.className   = '';
+      return;
+    }
+  }
+
+  // Build G-code (same projection as the Export button).
+  const params  = _buildExportParams();
+  const paths   = visualizer.getProjectedPaths();
+  const content = gcode.projectedPathsToGCode(paths, {
+    feedRate:        params.feedRate,
+    penDownFeedRate: 300,
+    penUpZ:          params.penUpZ,
+    penDownZ:        params.penDownZ,
+    penMode:         params.penMode,
+    penUpS:          params.penUpS,
+    penDownS:        params.penDownS,
+    coreXY:          params.coreXY,
+    aspect:          visualizer.getCameraAspect(),
+    params,
+  });
+
+  // Stream to GRBL.
+  btnSerialSend.textContent = 'Cancel';
+  btnSerialSend.disabled    = false;
+
+  try {
+    statusLabel.className = 'active';
+    const { cancelled } = await serial.sendGCode(content, (sent, total) => {
+      statusLabel.textContent = `Sending ${sent} / ${total}`;
+    });
+    if (cancelled) {
+      statusLabel.textContent = 'Send cancelled';
+      statusLabel.className   = '';
+    } else {
+      statusLabel.textContent = 'Plot sent';
+      statusLabel.className   = 'done';
+    }
+  } catch (err) {
+    statusLabel.textContent = `Plotter error: ${err?.message ?? err}`;
+    statusLabel.className   = '';
+  } finally {
+    btnSerialSend.textContent = 'Send to Plotter';
+    btnSerialSend.disabled    = false;
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Plotter machine controls (Home, Set Origin, Pen Up/Down)
+// Each button auto-connects if needed, then sends a single GRBL command.
 // ---------------------------------------------------------------------------
 
+async function _plotterCommand(cmd) {
+  if (!serial.isAvailable()) return;
+  if (!serial.isConnected()) {
+    try {
+      statusLabel.textContent = 'Connecting to plotter…';
+      statusLabel.className   = 'active';
+      await serial.connect();
+    } catch (err) {
+      statusLabel.textContent = 'No port selected';
+      statusLabel.className   = '';
+      return;
+    }
+  }
+  try {
+    await serial.sendCommand(cmd);
+    statusLabel.textContent = `Done: ${cmd}`;
+    statusLabel.className   = 'done';
+  } catch (err) {
+    statusLabel.textContent = `Plotter error: ${err?.message ?? err}`;
+    statusLabel.className   = '';
+  }
+}
+
+btnPlotterHome.addEventListener('click', () => _plotterCommand('$H'));
+
+btnPlotterZeroXY.addEventListener('click', () => _plotterCommand('G92 X0 Y0'));
+
+btnPlotterZeroZ.addEventListener('click', () => _plotterCommand('G92 Z0'));
+
+btnPlotterPenUp.addEventListener('click', () => {
+  if (inputPenMode.value === 'servo') {
+    const s = parseInt(inputPenUpS.value) || 80;
+    _plotterCommand(`M3 S${s}`);
+  } else {
+    const z = parseFloat(inputPenUpZ.value) || 5;
+    _plotterCommand(`G0 Z${z.toFixed(3)}`);
+  }
+});
+
+btnPlotterPenDown.addEventListener('click', () => {
+  if (inputPenMode.value === 'servo') {
+    const s = parseInt(inputPenDownS.value) || 50;
+    _plotterCommand(`M3 S${s}`);
+  } else {
+    const z = parseFloat(inputPenDownZ.value) ?? 0;
+    _plotterCommand(`G1 Z${z.toFixed(3)} F300`);
+  }
+});
+
+btnServoSweep.addEventListener('click', async () => {
+  if (serial.isSending()) {
+    serial.cancelSend();
+    return;
+  }
+  if (!serial.isAvailable()) return;
+  if (!serial.isConnected()) {
+    try {
+      statusLabel.textContent = 'Connecting to plotter…';
+      statusLabel.className   = 'active';
+      await serial.connect();
+    } catch (err) {
+      statusLabel.textContent = 'No port selected';
+      statusLabel.className   = '';
+      return;
+    }
+  }
+
+  // Build M3 ramp: S0 → S1000 → S0 in steps of 10, 100 ms dwell each step.
+
+  const sweepStart = 0;
+  const sweepEnd   = 1000;
+  const sweepStep  = 2;
+  const sweepDwell = 0.25;
+
+  const lines = [];
+  for (let s = sweepStart; s <= sweepEnd; s += sweepStep) { lines.push(`M3 S${s}`, `G4 P${sweepDwell}`); }
+  for (let s = sweepEnd; s >= sweepStart; s -= sweepStep)  { lines.push(`M3 S${s}`, `G4 P${sweepDwell}`); }
+  lines.push('M5');
+  const content = lines.join('\n');
+
+  btnServoSweep.textContent = 'Stop Sweep';
+  try {
+    statusLabel.className = 'active';
+    const { cancelled } = await serial.sendGCode(content, (sent, total) => {
+      statusLabel.textContent = `Sweep ${sent} / ${total}`;
+    });
+    statusLabel.textContent = cancelled ? 'Sweep cancelled' : 'Sweep complete';
+    statusLabel.className   = '';
+  } catch (err) {
+    statusLabel.textContent = `Sweep error: ${err?.message ?? err}`;
+    statusLabel.className   = '';
+  } finally {
+    btnServoSweep.textContent = 'Sweep S';
+  }
+});
+
+function _updatePenModeVis() {
+  const isServo = inputPenMode.value === 'servo';
+  zUpCtrl.classList.toggle('hidden', isServo);
+  zDownCtrl.classList.toggle('hidden', isServo);
+  servoUpCtrl.classList.toggle('hidden', !isServo);
+  servoDownCtrl.classList.toggle('hidden', !isServo);
+}
+
+inputPenMode.addEventListener('change', _updatePenModeVis);
+
+// Jog — uses GRBL's $J command (relative move, never touches work coordinates).
+async function _jog(axis, dir) {
+  if (!serial.isAvailable()) return;
+  const step      = parseFloat(jogStepSelect.value) || 1;
+  const feedRate  = step <= 0.1 ? 400 : step <= 1 ? 2000 : 5000;
+  const d         = dir * step;
+
+  // Apply axis swap (X↔Y, Z is never swapped).
+  const physAxis = (jogSwapXY.checked && axis !== 'Z')
+    ? (axis === 'X' ? 'Y' : 'X')
+    : axis;
+
+  // Build the GRBL jog command.
+  // CoreXY mode: a single physical axis requires driving both GRBL motors.
+  //   Physical X+ → motor A fwd + motor B fwd  → X+{d} Y+{d}
+  //   Physical Y+ → motor A fwd + motor B back  → X+{d} Y-{d}
+  let cmd;
+  if (jogCoreXY.checked && physAxis !== 'Z') {
+    const ds = d.toFixed(3);
+    const dn = (-d).toFixed(3);
+    cmd = physAxis === 'X'
+      ? `$J=G21 G91 X${ds} Y${ds} F${feedRate}`
+      : `$J=G21 G91 X${ds} Y${dn} F${feedRate}`;
+  } else {
+    cmd = `$J=G21 G91 ${physAxis}${d.toFixed(3)} F${feedRate}`;
+  }
+
+  await _plotterCommand(cmd);
+}
+
+btnJogXP.addEventListener('click', () => _jog('X',  1));
+btnJogXM.addEventListener('click', () => _jog('X', -1));
+btnJogYP.addEventListener('click', () => _jog('Y',  1));
+btnJogYM.addEventListener('click', () => _jog('Y', -1));
+btnJogZP.addEventListener('click', () => _jog('Z',  1));
+btnJogZM.addEventListener('click', () => _jog('Z', -1));
+
+// ---------------------------------------------------------------------------
+// Serial Monitor
+// ---------------------------------------------------------------------------
+
+const MAX_MONITOR_LINES = 500;
+
+function _appendMonitorLine(type, text) {
+  const wasAtBottom =
+    monitorLog.scrollHeight - monitorLog.scrollTop <= monitorLog.clientHeight + 4;
+
+  const el = document.createElement('div');
+  el.className = `monitor-line monitor-${type}`;
+  if (type === 'rx') {
+    if (text === 'ok') el.classList.add('monitor-ok');
+    else if (text.startsWith('error') || text.startsWith('ALARM')) el.classList.add('monitor-err');
+  }
+  const prefix = type === 'tx' ? '> ' : type === 'rx' ? '< ' : '  ';
+  el.textContent = prefix + text;
+
+  if (monitorLog.children.length >= MAX_MONITOR_LINES) {
+    monitorLog.removeChild(monitorLog.firstChild);
+  }
+  monitorLog.appendChild(el);
+
+  if (wasAtBottom) monitorLog.scrollTop = monitorLog.scrollHeight;
+}
+
+function _updateMonitorConnStatus() {
+  if (serial.isConnected()) {
+    monitorConnStatus.textContent = '● connected';
+    monitorConnStatus.classList.add('connected');
+  } else {
+    monitorConnStatus.textContent = '○ not connected';
+    monitorConnStatus.classList.remove('connected');
+  }
+}
+
+// Register the serial event listener so all tx/rx/info flows through the log.
+serial.addMonitorListener((type, text) => {
+  _appendMonitorLine(type, text);
+  if (type === 'info') _updateMonitorConnStatus();
+});
+
+// Toggle open / close.
+btnMonitorToggle.addEventListener('click', () => {
+  const nowHidden = serialMonitor.classList.toggle('hidden');
+  btnMonitorToggle.classList.toggle('active', !nowHidden);
+  if (!nowHidden) {
+    monitorLog.scrollTop = monitorLog.scrollHeight;
+    _updateMonitorConnStatus();
+    monitorInput.focus();
+  }
+});
+
+btnMonitorClose.addEventListener('click', () => {
+  serialMonitor.classList.add('hidden');
+  btnMonitorToggle.classList.remove('active');
+});
+
+btnMonitorClear.addEventListener('click', () => {
+  monitorLog.innerHTML = '';
+});
+
+// Send a command from the monitor input — auto-connects if needed.
+async function _monitorSend() {
+  const cmd = monitorInput.value.trim();
+  if (!cmd) return;
+  monitorInput.value = '';
+
+  if (!serial.isAvailable()) {
+    _appendMonitorLine('info', 'Web Serial not available in this browser');
+    return;
+  }
+  if (!serial.isConnected()) {
+    try {
+      _appendMonitorLine('info', 'Connecting…');
+      await serial.connect();
+      _updateMonitorConnStatus();
+    } catch (err) {
+      _appendMonitorLine('info', `Connect failed: ${err?.message ?? err}`);
+      return;
+    }
+  }
+  try {
+    await serial.sendCommand(cmd);
+  } catch (err) {
+    _appendMonitorLine('info', `Error: ${err?.message ?? err}`);
+  }
+}
+
+btnMonitorSend.addEventListener('click', _monitorSend);
+monitorInput.addEventListener('keydown', e => { if (e.key === 'Enter') _monitorSend(); });
+
+// ---------------------------------------------------------------------------
 /**
  * Rebuild the 3D visualization from stored frames using current settings.
  * Only meaningful in STOPPED state with captured frames.
@@ -618,11 +988,18 @@ function _saveSettings() {
       maxFrames:  inputMaxFrames.value,
       ampScale:   inputAmpScale.value,
       feedRate:   inputFeedRate.value,
+      penUpZ:     inputPenUpZ.value,
+      penDownZ:   inputPenDownZ.value,
+      penMode:    inputPenMode.value,
+      penUpS:     inputPenUpS.value,
+      penDownS:   inputPenDownS.value,
       fftSize:    inputFftSize.value,
       recordFps:  inputRecordFps.value,
       smoothing:  inputSmoothing.value,
       cameraPos:  cameraPosInput.value,
       cameraTgt:  cameraTargetInput.value,
+      jogSwapXY:  jogSwapXY.checked,
+      jogCoreXY:  jogCoreXY.checked,
     }));
   } catch (_) { /* private browsing / quota */ }
 }
@@ -648,11 +1025,18 @@ function _loadSettings() {
   apply(inputMaxFrames,    s.maxFrames);
   apply(inputAmpScale,     s.ampScale);
   apply(inputFeedRate,     s.feedRate);
+  apply(inputPenUpZ,       s.penUpZ);
+  apply(inputPenDownZ,     s.penDownZ);
+  apply(inputPenMode,      s.penMode);
+  apply(inputPenUpS,       s.penUpS);
+  apply(inputPenDownS,     s.penDownS);
   apply(inputFftSize,      s.fftSize);
   apply(inputRecordFps,    s.recordFps);
   apply(inputSmoothing,    s.smoothing);
   apply(cameraPosInput,    s.cameraPos);
   apply(cameraTargetInput, s.cameraTgt);
+  if (s.jogSwapXY != null) jogSwapXY.checked = s.jogSwapXY;
+  if (s.jogCoreXY != null) jogCoreXY.checked = s.jogCoreXY;
 
   // Sync JS state variables to restored values
   if (s.source) currentSource = s.source;
@@ -666,6 +1050,7 @@ function _loadSettings() {
   noiseSection.classList.toggle('hidden', currentSource !== 'noise');
   micOnlyCtrls.forEach(el => el.classList.toggle('hidden', currentSource !== 'mic'));
   _syncNoiseOctaveControls();
+  _updatePenModeVis();
 
   // Sync output display elements for range sliders
   if (noiseSpeedVal) noiseSpeedVal.value = noiseSpeedInput.value;
@@ -711,6 +1096,11 @@ function _savePreset() {
     maxFrames:  inputMaxFrames.value,
     ampScale:   inputAmpScale.value,
     feedRate:   inputFeedRate.value,
+    penUpZ:     inputPenUpZ.value,
+    penDownZ:   inputPenDownZ.value,
+    penMode:    inputPenMode.value,
+    penUpS:     inputPenUpS.value,
+    penDownS:   inputPenDownS.value,
     fftSize:    inputFftSize.value,
     recordFps:  inputRecordFps.value,
     smoothing:  inputSmoothing.value,
@@ -748,6 +1138,11 @@ function _applyPreset(source, shape) {
   apply(inputMaxFrames,    preset.maxFrames);
   apply(inputAmpScale,     preset.ampScale);
   apply(inputFeedRate,     preset.feedRate);
+  apply(inputPenUpZ,       preset.penUpZ);
+  apply(inputPenDownZ,     preset.penDownZ);
+  apply(inputPenMode,      preset.penMode);
+  apply(inputPenUpS,       preset.penUpS);
+  apply(inputPenDownS,     preset.penDownS);
   apply(inputFftSize,      preset.fftSize);
   apply(inputRecordFps,    preset.recordFps);
   apply(inputSmoothing,    preset.smoothing);
@@ -759,6 +1154,7 @@ function _applyPreset(source, shape) {
 
   // Sync visible state
   _syncNoiseOctaveControls();
+  _updatePenModeVis();
   if (noiseSpeedVal) noiseSpeedVal.value = noiseSpeedInput.value;
   if (noiseFreqVal)  noiseFreqVal.value  = noiseFreqInput.value;
   if (noiseOctVal)   noiseOctVal.value   = noiseOctInput.value;
@@ -794,6 +1190,8 @@ window.addEventListener('DOMContentLoaded', () => {
   _loadSettings();
   // Ensure mic-only controls match initial source (handles fresh session with no saved state).
   micOnlyCtrls.forEach(el => el.classList.toggle('hidden', currentSource !== 'mic'));
+  // Ensure pen mode controls match initial setting.
+  _updatePenModeVis();
   // Show preset indicator for the restored combo.
   _updatePresetUI();
 
@@ -814,5 +1212,15 @@ window.addEventListener('DOMContentLoaded', () => {
   const cfg = getConfig();
   noise.configure({ ...getNoiseConfig(), fftSize: cfg.fftSize });
 
+  // Hide serial-dependent UI if Web Serial API is not available.
+  if (!serial.isAvailable()) {
+    btnSerialSend.style.display = 'none';
+    btnMonitorToggle.style.display = 'none';
+    document.getElementById('controls-plotter').style.display = 'none';
+  }
+
   requestAnimationFrame(loop);
 });
+
+// Disconnect the serial port cleanly when the page unloads.
+window.addEventListener('beforeunload', () => { serial.disconnect(); });

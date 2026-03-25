@@ -41,8 +41,11 @@ export function framesToGCode(frames, dataMode, shape, config = {}) {
   const penUpZ      = config.penUpZ           ?? 5;
   const penDownZ    = config.penDownZ         ?? 0;
   const ampScale    = config.amplitudeScaleMm ?? 8;
+  const penMode     = config.penMode          ?? 'z';
+  const penUpS      = config.penUpS           ?? 80;
+  const penDownS    = config.penDownS         ?? 50;
 
-  const opts = { feedRate, penDownFeed, penUpZ, penDownZ, ampScale };
+  const opts = { feedRate, penDownFeed, penUpZ, penDownZ, ampScale, penMode, penUpS, penDownS };
   const lines = [];
   const ts = new Date().toISOString();
 
@@ -53,7 +56,7 @@ export function framesToGCode(frames, dataMode, shape, config = {}) {
   lines.push(`; Plot area: ${PLOT_W} x ${PLOT_H} mm`);
   lines.push(`G21          ; Units: millimetres`);
   lines.push(`G90          ; Absolute positioning`);
-  lines.push(`G0 Z${f(penUpZ)}`);
+  _penUp(lines, opts);
   lines.push(`G0 X${f(MARGIN)} Y${f(MARGIN)}`);
   lines.push('');
 
@@ -67,7 +70,7 @@ export function framesToGCode(frames, dataMode, shape, config = {}) {
         : _monoGCode(lines, frames, opts);
   }
 
-  lines.push(`G0 Z${f(penUpZ)}`);
+  _penUp(lines, opts);
   lines.push(`G0 X${f(0)} Y${f(0)}`);
   lines.push(`M2`);
 
@@ -90,7 +93,7 @@ function _monoGCode(lines, frames, opts) {
 
     lines.push(`; --- Frame ${fi} (Y_base = ${f(yBase)} mm) ---`);
     lines.push(`G0 X${f(MARGIN)} Y${f(clampY(yBase))}`);
-    lines.push(`G1 Z${f(penDownZ)} F${penDownFeed}`);
+    _penDown(lines, opts);
 
     for (let i = 0; i < N; i++) {
       const px = MARGIN + (i / (N - 1)) * PLOT_W;
@@ -98,7 +101,7 @@ function _monoGCode(lines, frames, opts) {
       lines.push(`G1 X${f(px)} Y${f(py)} F${feedRate}`);
     }
 
-    lines.push(`G0 Z${f(penUpZ)}`);
+    _penUp(lines, opts);
     lines.push('');
   }
 }
@@ -123,7 +126,7 @@ function _stereoGCode(lines, frames, opts) {
 
       lines.push(`; --- ${ch} Frame ${fi} (Y_base = ${f(yBase)} mm) ---`);
       lines.push(`G0 X${f(MARGIN)} Y${f(clampY(yBase))}`);
-      lines.push(`G1 Z${f(penDownZ)} F${penDownFeed}`);
+      _penDown(lines, opts);
 
       for (let i = 0; i < N; i++) {
         const px = MARGIN + (i / (N - 1)) * PLOT_W;
@@ -131,7 +134,7 @@ function _stereoGCode(lines, frames, opts) {
         lines.push(`G1 X${f(px)} Y${f(py)} F${feedRate}`);
       }
 
-      lines.push(`G0 Z${f(penUpZ)}`);
+      _penUp(lines, opts);
       lines.push('');
     }
   }
@@ -158,7 +161,7 @@ function _circularGCode(lines, frames, opts) {
     const a0 = 0;
     const r0 = clampR(baseRadius + data[0] * ringAmpMm);
     lines.push(`G0 X${f(CENTER_X + r0 * Math.cos(a0))} Y${f(CENTER_Y + r0 * Math.sin(a0))}`);
-    lines.push(`G1 Z${f(penDownZ)} F${penDownFeed}`);
+    _penDown(lines, opts);
 
     // Draw N+1 points to close the ring.
     for (let i = 1; i <= N; i++) {
@@ -170,7 +173,7 @@ function _circularGCode(lines, frames, opts) {
       lines.push(`G1 X${f(px)} Y${f(py)} F${feedRate}`);
     }
 
-    lines.push(`G0 Z${f(penUpZ)}`);
+    _penUp(lines, opts);
     lines.push('');
   }
 }
@@ -194,7 +197,7 @@ function _spiralGCode(lines, frames, opts) {
   const startAngle = 0;
   const startR     = INNER_R;
   lines.push(`G0 X${f(CENTER_X + startR * Math.cos(startAngle))} Y${f(CENTER_Y + startR * Math.sin(startAngle))}`);
-  lines.push(`G1 Z${f(penDownZ)} F${penDownFeed}`);
+  _penDown(lines, opts);
 
   for (let gi = 0; gi < total; gi++) {
     const fi    = Math.floor(gi / N);
@@ -208,7 +211,7 @@ function _spiralGCode(lines, frames, opts) {
     lines.push(`G1 X${f(px)} Y${f(py)} F${feedRate}`);
   }
 
-  lines.push(`G0 Z${f(penUpZ)}`);
+  _penUp(lines, opts);
   lines.push('');
 }
 
@@ -249,7 +252,7 @@ function _lissajousGCode(lines, frames, opts) {
     const x0 = clampX(CENTER_X + left[0] * halfSize);
     const y0 = clampY(CENTER_Y + right[0] * halfSize);
     lines.push(`G0 X${f(x0)} Y${f(y0)}`);
-    lines.push(`G1 Z${f(penDownZ)} F${penDownFeed}`);
+    _penDown(lines, opts);
 
     for (let i = 1; i < N; i++) {
       const px = clampX(CENTER_X + left[i] * halfSize);
@@ -257,7 +260,7 @@ function _lissajousGCode(lines, frames, opts) {
       lines.push(`G1 X${f(px)} Y${f(py)} F${feedRate}`);
     }
 
-    lines.push(`G0 Z${f(penUpZ)}`);
+    _penUp(lines, opts);
     lines.push('');
   }
 }
@@ -400,7 +403,12 @@ export function projectedPathsToGCode(paths, config = {}) {
   const penDownFeed = config.penDownFeedRate ?? 300;
   const penUpZ      = config.penUpZ          ?? 5;
   const penDownZ    = config.penDownZ        ?? 0;
+  const penMode     = config.penMode         ?? 'z';
+  const penUpS      = config.penUpS          ?? 80;
+  const penDownS    = config.penDownS        ?? 50;
+  const coreXY      = !!config.coreXY;
   const { sx, sy }  = _ndcScales(config.aspect ?? 1);
+  const penOpts     = { penMode, penUpZ, penDownZ, penDownFeed, penUpS, penDownS };
 
   const lines = [];
   const ts = new Date().toISOString();
@@ -412,8 +420,8 @@ export function projectedPathsToGCode(paths, config = {}) {
   _writeParams(lines, config.params);
   lines.push(`G21          ; Units: millimetres`);
   lines.push(`G90          ; Absolute positioning`);
-  lines.push(`G0 Z${f(penUpZ)}`);
-  lines.push(`G0 X${f(MARGIN)} Y${f(MARGIN)}`);
+  _penUp(lines, penOpts);
+  lines.push(`G0 ${_xy(MARGIN, MARGIN, coreXY)}`);
   lines.push('');
 
   for (const path of paths) {
@@ -421,20 +429,20 @@ export function projectedPathsToGCode(paths, config = {}) {
 
     // Map first point and rapid move to it (pen up).
     const { px: x0, py: y0 } = _ndcToPaper(path[0].nx, path[0].ny, sx, sy);
-    lines.push(`G0 X${f(x0)} Y${f(y0)}`);
-    lines.push(`G1 Z${f(penDownZ)} F${penDownFeed}`);
+    lines.push(`G0 ${_xy(x0, y0, coreXY)}`);
+    _penDown(lines, penOpts);
 
     for (let i = 1; i < path.length; i++) {
       const { px, py } = _ndcToPaper(path[i].nx, path[i].ny, sx, sy);
-      lines.push(`G1 X${f(px)} Y${f(py)} F${feedRate}`);
+      lines.push(`G1 ${_xy(px, py, coreXY)} F${feedRate}`);
     }
 
-    lines.push(`G0 Z${f(penUpZ)}`);
+    _penUp(lines, penOpts);
   }
 
   lines.push('');
-  lines.push(`G0 Z${f(penUpZ)}`);
-  lines.push(`G0 X${f(0)} Y${f(0)}`);
+  _penUp(lines, penOpts);
+  lines.push(`G0 X0.000 Y0.000`);
   lines.push(`M2`);
 
   return lines.join('\n');
@@ -457,7 +465,12 @@ export function stereoPathsToGCode(leftPaths, rightPaths, config = {}) {
   const penDownFeed = config.penDownFeedRate ?? 300;
   const penUpZ      = config.penUpZ          ?? 5;
   const penDownZ    = config.penDownZ        ?? 0;
+  const penMode     = config.penMode         ?? 'z';
+  const penUpS      = config.penUpS          ?? 80;
+  const penDownS    = config.penDownS        ?? 50;
+  const coreXY      = !!config.coreXY;
   const { sx, sy }  = _ndcScales(config.aspect ?? 1);
+  const penOpts     = { penMode, penUpZ, penDownZ, penDownFeed, penUpS, penDownS };
 
   const lines = [];
   const ts = new Date().toISOString();
@@ -470,8 +483,8 @@ export function stereoPathsToGCode(leftPaths, rightPaths, config = {}) {
   _writeParams(lines, config.params);
   lines.push(`G21          ; Units: millimetres`);
   lines.push(`G90          ; Absolute positioning`);
-  lines.push(`G0 Z${f(penUpZ)}`);
-  lines.push(`G0 X${f(MARGIN)} Y${f(MARGIN)}`);
+  _penUp(lines, penOpts);
+  lines.push(`G0 ${_xy(MARGIN, MARGIN, coreXY)}`);
   lines.push('');
   lines.push(`; ===== PASS 1: RED (left eye) =====`);
 
@@ -479,21 +492,21 @@ export function stereoPathsToGCode(leftPaths, rightPaths, config = {}) {
     for (const path of paths) {
       if (path.length < 2) continue;
       const { px: x0, py: y0 } = _ndcToPaper(path[0].nx, path[0].ny, sx, sy);
-      lines.push(`G0 X${f(x0)} Y${f(y0)}`);
-      lines.push(`G1 Z${f(penDownZ)} F${penDownFeed}`);
+      lines.push(`G0 ${_xy(x0, y0, coreXY)}`);
+      _penDown(lines, penOpts);
       for (let i = 1; i < path.length; i++) {
         const { px, py } = _ndcToPaper(path[i].nx, path[i].ny, sx, sy);
-        lines.push(`G1 X${f(px)} Y${f(py)} F${feedRate}`);
+        lines.push(`G1 ${_xy(px, py, coreXY)} F${feedRate}`);
       }
-      lines.push(`G0 Z${f(penUpZ)}`);
+      _penUp(lines, penOpts);
     }
   }
 
   _writePaths(leftPaths);
 
   lines.push('');
-  lines.push(`G0 Z${f(penUpZ)}`);
-  lines.push(`G0 X${f(MARGIN)} Y${f(MARGIN)}`);
+  _penUp(lines, penOpts);
+  lines.push(`G0 ${_xy(MARGIN, MARGIN, coreXY)}`);
   lines.push(`M0           ; Pause — swap to CYAN pen`);
   lines.push('');
   lines.push(`; ===== PASS 2: CYAN (right eye) =====`);
@@ -501,8 +514,8 @@ export function stereoPathsToGCode(leftPaths, rightPaths, config = {}) {
   _writePaths(rightPaths);
 
   lines.push('');
-  lines.push(`G0 Z${f(penUpZ)}`);
-  lines.push(`G0 X${f(0)} Y${f(0)}`);
+  _penUp(lines, penOpts);
+  lines.push(`G0 X0.000 Y0.000`);
   lines.push(`M2`);
 
   return lines.join('\n');
@@ -535,6 +548,28 @@ function _ndcToPaper(nx, ny, sx, sy) {
 }
 
 // ---------------------------------------------------------------------------
+// Pen up / down helpers — generate the right command for Z-axis or servo mode
+// ---------------------------------------------------------------------------
+
+function _penUp(lines, opts) {
+  if (opts.penMode === 'servo') {
+    lines.push(`M3 S${opts.penUpS ?? 80}`);
+    lines.push(`G4 P0.1`);
+  } else {
+    lines.push(`G0 Z${f(opts.penUpZ)}`);
+  }
+}
+
+function _penDown(lines, opts) {
+  if (opts.penMode === 'servo') {
+    lines.push(`M3 S${opts.penDownS ?? 50}`);
+    lines.push(`G4 P0.1`);
+  } else {
+    lines.push(`G1 Z${f(opts.penDownZ)} F${opts.penDownFeed}`);
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Internal helpers
 // ---------------------------------------------------------------------------
 
@@ -542,6 +577,13 @@ function f(n)        { return n.toFixed(3); }
 function clampX(x)   { return Math.max(MARGIN, Math.min(MARGIN + PLOT_W, x)); }
 function clampY(y)   { return Math.max(MARGIN, Math.min(MARGIN + PLOT_H, y)); }
 function clampR(r)   { return Math.max(0, Math.min(MAX_R, r)); }
+
+// Map Cartesian paper coords (mm) to a G-code XY fragment.
+// When coreXY is true applies the CoreXY motor transform: A = X+Y, B = X−Y.
+function _xy(px, py, coreXY) {
+  if (coreXY) return `X${f(px + py)} Y${f(px - py)}`;
+  return `X${f(px)} Y${f(py)}`;
+}
 
 function _rowAmpScaleMm(frameCount, configScale) {
   const rowSpacing = frameCount > 1 ? PLOT_H / (frameCount - 1) : PLOT_H;
