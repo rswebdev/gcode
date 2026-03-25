@@ -1,6 +1,6 @@
 /**
  * visualizer.js
- * Three.js 3D scene. Supports twelve shapes:
+ * Three.js 3D scene. Supports thirteen shapes:
  *   linear      — stacked wave lines (Joy Division)
  *   circular    — concentric amplitude rings on the XZ plane
  *   spiral      — one continuous spiral, rebuilt on each new frame
@@ -14,6 +14,7 @@
  *   chladni     — Chladni nodal pattern zero-crossings driven by dominant frequency
  *   moire       — two offset concentric ring families per frame
  *   landscape   — Joy Division occlusion ridges with opaque fill polygons
+ *   heatmap     — frequency spectrogram grid with cross-hatch density
  */
 
 import * as THREE from 'three';
@@ -52,7 +53,7 @@ let cfg       = { ampScale: 2.0, maxFrames: 64 };
 // a new frame is added. Per-frame shapes append one (or more) lines.
 // ---------------------------------------------------------------------------
 export const REBUILD_ALL_SHAPES = new Set([
-  'spiral', 'phyllotaxis', 'tube', 'flowfield', 'terrain', 'harmonograph', 'chladni', 'landscape',
+  'spiral', 'phyllotaxis', 'tube', 'flowfield', 'terrain', 'harmonograph', 'chladni', 'landscape', 'heatmap',
 ]);
 
 // ---------------------------------------------------------------------------
@@ -89,7 +90,7 @@ export function init(canvas, config) {
 
 /**
  * Switch rendering shape. Clears all existing lines and repositions camera.
- * @param {'linear'|'circular'|'spiral'|'lissajous'|'phyllotaxis'|'tube'|'terrain'|'harmonograph'|'flowfield'|'epicycles'|'chladni'|'moire'|'landscape'} newShape
+ * @param {'linear'|'circular'|'spiral'|'lissajous'|'phyllotaxis'|'tube'|'terrain'|'harmonograph'|'flowfield'|'epicycles'|'chladni'|'moire'|'landscape'|'heatmap'} newShape
  */
 export function setShape(newShape) {
   shape = newShape;
@@ -383,6 +384,7 @@ function _rebuildAll(allFrames, isLive) {
     case 'flowfield':    _rebuildFlowField(allFrames, isLive);    break;
     case 'chladni':      _rebuildChladni(allFrames, isLive);      break;
     case 'landscape':    _rebuildLandscape(allFrames, isLive);    break;
+    case 'heatmap':      _rebuildHeatmap(allFrames, isLive);      break;
   }
 }
 
@@ -1042,22 +1044,43 @@ function _rebuildLandscape(allFrames, isLive) {
     scene.add(line);
   }
 
-  // ---- PERPENDICULAR PASS: full crest-connecting polylines along Z ----
-  // Draw full unmasked polylines connecting each frame's crest at each X column.
-  // Fills with polygonOffset push fills slightly behind lines at each Z plane, so
-  // lines appear on top visually. _getLandscapeProjectedPaths() handles screen-space
-  // horizon masking for G-code export.
+  // ---- CIRCLE PASS: amplitude-sized circles at grid intersections ----
+  // Replace perpendicular connecting lines with circles in the XY plane (vertical),
+  // centered at each sample's amplitude height. Radius ∝ |amplitude|.
   const N_STEP = Math.max(4, Math.min(64, Math.round(N / Math.max(F, 4))));
+  const CIRCLE_SEGS_L = 20;
+  const maxCircleR = Math.min(zSpacing, (SCENE_W / N) * N_STEP) * 0.4;
+  const circleVerts = [];
 
   for (let si = 0; si < N; si += N_STEP) {
-    const x   = (si / (N - 1)) * SCENE_W - SCENE_W / 2;
-    const pos = new Float32Array(F * 3);
+    const x = (si / (N - 1)) * SCENE_W - SCENE_W / 2;
     for (let fi = 0; fi < F; fi++) {
-      pos[fi * 3]     = x;
-      pos[fi * 3 + 1] = yValues[fi][si];
-      pos[fi * 3 + 2] = fi * zSpacing;
+      const y = yValues[fi][si];
+      const z = fi * zSpacing;
+      const r = Math.abs(y) / (4 * cfg.ampScale || 1) * maxCircleR;
+      if (r < maxCircleR * 0.03) continue;  // skip near-zero
+
+      // Circle in XY plane at this Z
+      for (let s = 0; s < CIRCLE_SEGS_L; s++) {
+        const a0 = (s / CIRCLE_SEGS_L) * Math.PI * 2;
+        const a1 = ((s + 1) / CIRCLE_SEGS_L) * Math.PI * 2;
+        circleVerts.push(
+          x + r * Math.cos(a0), y + r * Math.sin(a0), z,
+          x + r * Math.cos(a1), y + r * Math.sin(a1), z
+        );
+      }
     }
-    _emitLandscapePerp(pos, isLive);
+  }
+
+  if (circleVerts.length > 0) {
+    const cPos  = new Float32Array(circleVerts);
+    const cGeo  = new THREE.BufferGeometry();
+    cGeo.setAttribute('position', new THREE.BufferAttribute(cPos, 3));
+    const cColor = isLive ? new THREE.Color(0xffffff) : new THREE.Color(0x5599cc);
+    const cMat   = new THREE.LineBasicMaterial({ color: cColor, transparent: true, opacity: isLive ? 0.3 : 0.5 });
+    const cSegs  = new THREE.LineSegments(cGeo, cMat);
+    waveLines.push(cSegs);
+    scene.add(cSegs);
   }
 }
 
@@ -1248,6 +1271,83 @@ function _getLandscapeProjectedPaths() {
   return allPaths;
 }
 
+/**
+ * Heatmap (spectrogram) — frequency bins × frames grid with cross-hatch density.
+ * Lies flat on the XZ plane (Y=0). Cell fill density proportional to amplitude.
+ */
+function _rebuildHeatmap(allFrames, isLive) {
+  if (!allFrames || allFrames.length === 0) return;
+
+  const F    = allFrames.length;
+  const raw0 = _toMono(allFrames[0]);
+  const N    = raw0.length;
+  const COLS = Math.min(N, 48);
+
+  const cellW    = SCENE_W / COLS;
+  const zSpacing = SCENE_DEPTH / Math.max(cfg.maxFrames - 1, 1);
+  const cellH    = zSpacing;
+  const CIRCLE_SEGS = 24;  // segments per circle polygon
+
+  // Subsample each frame into COLS bins and find global max for normalization.
+  const grid = [];
+  let globalMax = 0;
+  for (let fi = 0; fi < F; fi++) {
+    const data = _toMono(allFrames[fi]);
+    const row  = new Float32Array(COLS);
+    for (let c = 0; c < COLS; c++) {
+      const lo = Math.floor(c * N / COLS);
+      const hi = Math.floor((c + 1) * N / COLS);
+      let sum = 0;
+      for (let i = lo; i < hi; i++) sum += Math.abs(data[i]);
+      row[c] = sum / Math.max(hi - lo, 1);
+    }
+    grid.push(row);
+    for (let c = 0; c < COLS; c++) {
+      if (row[c] > globalMax) globalMax = row[c];
+    }
+  }
+  if (globalMax < 1e-6) globalMax = 1;
+
+  const vertices = [];
+
+  // --- Circles per cell (radius proportional to amplitude) ---
+  const maxR  = Math.min(cellW, cellH) * 0.45;  // max circle radius (fits inside cell)
+  const gridX = -SCENE_W / 2;
+
+  for (let fi = 0; fi < F; fi++) {
+    const row = grid[fi];
+    const xShift = (fi % 2) * cellW * 0.5;  // honeycomb: odd rows offset by half cell
+    for (let c = 0; c < COLS; c++) {
+      const norm = row[c] / globalMax;
+      if (norm < 0.02) continue;  // skip near-silent cells
+
+      const r   = norm * maxR;
+      const ccx = gridX + (c + 0.5) * cellW + xShift;
+      const ccz = fi * cellH + cellH * 0.5;
+
+      // Draw circle as line-segment pairs (closed polygon on XZ plane)
+      for (let s = 0; s < CIRCLE_SEGS; s++) {
+        const a0 = (s / CIRCLE_SEGS) * Math.PI * 2;
+        const a1 = ((s + 1) / CIRCLE_SEGS) * Math.PI * 2;
+        vertices.push(
+          ccx + r * Math.cos(a0), 0, ccz + r * Math.sin(a0),
+          ccx + r * Math.cos(a1), 0, ccz + r * Math.sin(a1)
+        );
+      }
+    }
+  }
+
+  if (vertices.length < 6) return;
+
+  const pos  = new Float32Array(vertices);
+  const geo  = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  const color = isLive ? new THREE.Color(0xffffff) : new THREE.Color(0x44ccee);
+  const mat   = new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.85 });
+  const segs  = new THREE.LineSegments(geo, mat);
+  waveLines.push(segs);
+  scene.add(segs);
+}
 
 
 function _makeLine(positions, frameIndex, isLive) {
@@ -1369,6 +1469,7 @@ function _positionCameraForShape(s) {
     chladni:      { pos: [0, 22,  3],  lookAt: [0, 0,  0] },
     moire:        { pos: [0, 22,  3],  lookAt: [0, 0,  0] },
     landscape:    { pos: [0,  6, 28],  lookAt: [0, 1, 10] },
+    heatmap:      { pos: [0, 22,  3],  lookAt: [0, 0,  0] },
   };
   const { pos, lookAt } = positions[s] || positions.linear;
   camera.position.set(...pos);
