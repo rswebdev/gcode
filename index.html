@@ -22,6 +22,8 @@
       <button id="btn-record">Record</button>
       <button id="btn-export" disabled>Export G-code</button>
       <button id="btn-export-anaglyph" disabled>Export Anaglyph</button>
+      <button id="btn-serial-send" disabled>Send to Plotter</button>
+      <button id="btn-monitor-toggle">Monitor</button>
       <button id="btn-rerender" disabled>Re-render</button>
       <span id="status-label">Idle</span>
       <span id="frame-counter">0 frames</span>
@@ -49,6 +51,7 @@
         <option value="chladni">Chladni (nodal lines)</option>
         <option value="moire">Moiré (offset rings)</option>
         <option value="landscape">Landscape (Joy Division)</option>
+        <option value="heatmap">Heatmap (spectrogram)</option>
       </select>
       <a id="advanced-toggle" href="#">Advanced ▸</a>
       <span id="preset-indicator" title="Preset saved for this source + shape"></span>
@@ -113,6 +116,29 @@
           <input id="setting-feed-rate" type="number" value="3000" min="100" max="10000" step="100">
         </label>
         <label>
+          Pen Mode
+          <select id="setting-pen-mode">
+            <option value="z" selected>Z axis</option>
+            <option value="servo">Servo (M3)</option>
+          </select>
+        </label>
+        <label id="z-up-ctrl">
+          Pen Up Z
+          <input id="setting-pen-up-z" type="number" value="5" min="-20" max="20" step="0.5">
+        </label>
+        <label id="z-down-ctrl">
+          Pen Down Z
+          <input id="setting-pen-down-z" type="number" value="0" min="-20" max="20" step="0.5">
+        </label>
+        <label id="servo-up-ctrl" class="hidden">
+          Servo Up S
+          <input id="setting-pen-up-s" type="number" value="80" min="0" max="1000" step="5">
+        </label>
+        <label id="servo-down-ctrl" class="hidden">
+          Servo Down S
+          <input id="setting-pen-down-s" type="number" value="50" min="0" max="1000" step="5">
+        </label>
+        <label>
           FFT Size
           <input id="setting-fft-size" type="number" value="512" min="32" max="2048" step="32">
         </label>
@@ -137,6 +163,51 @@
         </label>
         <button id="btn-camera-set">Set</button>
         <button id="btn-camera-reset">Reset</button>
+      </section>
+
+      <section id="controls-plotter">
+        <div class="plotter-group">
+          <span class="plotter-label">Machine</span>
+          <button id="btn-plotter-home"    title="Run GRBL homing cycle ($H)">Home</button>
+          <button id="btn-plotter-zero-xy" title="Zero X,Y at current position (G92 X0 Y0)">Zero X,Y</button>
+          <button id="btn-plotter-zero-z"  title="Zero Z at current position — touch paper first (G92 Z0)">Zero Z</button>
+        </div>
+
+        <div class="plotter-group">
+          <span class="plotter-label">Pen</span>
+          <button id="btn-plotter-pen-up"   title="Lift pen to Pen Up Z">Pen Up</button>
+          <button id="btn-plotter-pen-down" title="Lower pen to Pen Down Z">Pen Down</button>
+          <button id="btn-servo-sweep"      title="Ramp M3 S0 → S1000 → S0 in 50-step increments to find MG90S servo range">Sweep S</button>
+        </div>
+
+        <div class="plotter-group">
+          <label class="plotter-label">Jog step
+            <select id="jog-step">
+              <option value="0.1">0.1 mm</option>
+              <option value="1" selected>1 mm</option>
+              <option value="10">10 mm</option>
+            </select>
+          </label>
+          <label class="plotter-label plotter-checkbox" title="Swap X and Y axis commands — use if X buttons move Y and vice versa">
+            <input id="jog-swap-xy" type="checkbox">
+            <span>Swap X,Y</span>
+          </label>
+          <label class="plotter-label plotter-checkbox" title="CoreXY kinematics — drives both motors together so X/Y buttons move in straight lines">
+            <input id="jog-corexy" type="checkbox">
+            <span>CoreXY</span>
+          </label>
+          <div id="jog-xy">
+            <div></div>
+            <button id="btn-jog-yp" class="jog-btn" title="Y+">Y+</button>
+            <button id="btn-jog-zp" class="jog-btn" title="Z+">Z+</button>
+            <button id="btn-jog-xm" class="jog-btn" title="X-">X-</button>
+            <div></div>
+            <button id="btn-jog-xp" class="jog-btn" title="X+">X+</button>
+            <div></div>
+            <button id="btn-jog-ym" class="jog-btn" title="Y-">Y-</button>
+            <button id="btn-jog-zm" class="jog-btn" title="Z-">Z-</button>
+          </div>
+        </div>
       </section>
     </div>
   </div>
@@ -185,6 +256,7 @@
         <tr><td>Epicycles</td><td>DFT arm snapshots per frame.</td></tr>
         <tr><td>Chladni</td><td>Nodal-line patterns from resonance modes.</td></tr>
         <tr><td>Moiré</td><td>Offset concentric rings producing moiré fringes.</td></tr>
+        <tr><td>Heatmap</td><td>Frequency spectrogram grid with cross-hatch density.</td></tr>
       </table>
 
       <h3>Advanced — Data</h3>
@@ -209,9 +281,26 @@
         <tr><td>Max Frames</td><td>Frame count at which recording auto-stops (8–256).</td></tr>
         <tr><td>Amp Scale</td><td>Vertical exaggeration of the waveform amplitude.</td></tr>
         <tr><td>Speed (mm/min)</td><td>Plotter feed rate — affects G-code only, not the preview.</td></tr>
+        <tr><td>Pen Mode</td><td><strong>Z axis</strong> — uses G0/G1 Z moves to lift/lower the pen (stepper motor). <strong>Servo (M3)</strong> — uses M3 S{value} to drive a servo connected to the spindle PWM output. Use Servo mode if your Z doesn't respond to Z commands.</td></tr>
+        <tr><td>Pen Up Z</td><td>(Z axis mode) Z height (mm) when the pen is lifted. Try 5; use negative values if your Z-axis is inverted.</td></tr>
+        <tr><td>Pen Down Z</td><td>(Z axis mode) Z height (mm) when the pen touches paper. Try 0 or a small negative value.</td></tr>
+        <tr><td>Servo Up S</td><td>(Servo mode) S value for pen lifted. With $30=1000 and 50 Hz GRBL the MG90S safe range is S50–S100 (5%–10% duty = 1–2 ms pulse). Default 80 ≈ 1.6 ms. Adjust until the servo fully lifts the pen. If the servo moves the wrong way, swap Up and Down values.</td></tr>
+        <tr><td>Servo Down S</td><td>(Servo mode) S value for pen on paper. Default 50 ≈ 1 ms (minimum MG90S pulse). Values below S50 (with $30=1000) are below the servo's minimum and may not move it. Adjust down from 50 until the pen just touches the paper.</td></tr>
         <tr><td>FFT Size</td><td>Audio analysis window size. Higher = more frequency detail.</td></tr>
         <tr><td>Record FPS</td><td>Frames captured per second (1–30). Lower = slower temporal evolution in the plot.</td></tr>
         <tr><td>Smoothing</td><td>Mic frequency-mode averaging (0 = raw, 0.95 = very smooth). Hidden when using Noise source.</td></tr>
+      </table>
+
+      <h3>Send to Plotter</h3>
+      <p>Requires Chrome or Edge over HTTPS / localhost. Connects directly to GRBL over USB Serial (115200 baud).</p>
+      <table>
+        <tr><td>Send to Plotter</td><td>Opens the port picker (first time), then streams G-code line-by-line with GRBL acknowledgement. Click again to cancel mid-job.</td></tr>
+        <tr><td>Home</td><td>Runs the GRBL homing cycle (<code>$H</code>). Requires limit switches.</td></tr>
+        <tr><td>Zero X,Y</td><td>Zeros X and Y work coordinates at the current head position (<code>G92 X0 Y0</code>). Jog the head to your plot origin corner, then click this.</td></tr>
+        <tr><td>Zero Z</td><td>Zeros Z at the current height (<code>G92 Z0</code>). Jog Z down until the pen just touches the paper, then click this. Pen Down Z should then be 0 and Pen Up Z your lift amount.</td></tr>
+        <tr><td>Pen Up / Pen Down</td><td>Move Z to the configured Pen Up / Pen Down Z values. Use to verify the lift height before plotting.</td></tr>
+        <tr><td>Sweep S</td><td>Ramps M3 S0 → S1000 → S0 in 50-step increments (300 ms per step) so you can watch the servo travel across its full range and identify the right Up/Down S values. Connects to the plotter automatically. Click again to stop mid-sweep.</td></tr>
+        <tr><td>Jog</td><td>Move the head in X, Y, or Z by the selected step size. Use to position before zeroing. Step sizes: 0.1 mm (fine), 1 mm, 10 mm.</td></tr>
       </table>
 
       <h3>Export</h3>
@@ -219,5 +308,19 @@
       <p><strong>Anaglyph</strong> export generates a two-pass file (red pen then cyan pen) for red-cyan 3D glasses.</p>
     </div>
   </div>
+  <div id="serial-monitor" class="hidden">
+    <div id="monitor-bar">
+      <span id="monitor-title">Serial Monitor</span>
+      <span id="monitor-conn-status"></span>
+      <button id="btn-monitor-clear">Clear</button>
+      <button id="btn-monitor-close">×</button>
+    </div>
+    <div id="monitor-log"></div>
+    <div id="monitor-send-row">
+      <input id="monitor-input" type="text" placeholder="Type GRBL command and press Enter…" spellcheck="false" autocomplete="off">
+      <button id="btn-monitor-send">Send</button>
+    </div>
+  </div>
+
 </body>
 </html>
