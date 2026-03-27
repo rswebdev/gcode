@@ -40,14 +40,17 @@ const DEFAULTS = {
   // Calibration
   calYMax:     260,
   calYStep:    20,
-  // Import
+  // Import / Paper
   importScale: 1.0,
+  paperSize:   'A4P',
   // Camera
   cameraPos:   '0 8 28',
   cameraTgt:   '0 0 10',
   // Jog
   jogSwapXY:   false,
   jogCoreXY:   false,
+  // G-code output
+  gcodeCoreXY: false,
 };
 
 function _load() {
