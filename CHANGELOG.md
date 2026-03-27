@@ -1,0 +1,90 @@
+# Changelog
+
+All notable changes to this project will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [Unreleased]
+
+## [1.0.0] - 2026-03-27
+
+### Added
+- **Three-module tabbed layout**: App restructured into Wave Recording, G-code Handling, and Serial Transmission tabs — all always-rendered via CSS to keep Three.js canvas, AudioContext, and Web Serial alive across tab switches.
+- **G-code 2D preview**: Canvas 2D plotter preview in the G-code tab showing NDC paths letterboxed onto an A4 paper outline with zoom support.
+- **Cross-module reactive stores**: Svelte writable stores for settings, wave state, G-code paths, serial state, and active tab enable clean data flow between modules.
+- **Inline serial monitor**: Toggleable monitor panel in the Serial tab with command history (arrow key navigation) and auto-scroll.
+- **Favicon**: Inline SVG waveform favicon to suppress browser 404 requests.
+- **Playwright**: Added as dev dependency for browser-based debugging and diagnostics.
+
+### Changed
+- **Framework migration**: Rewritten from vanilla JS to Svelte 5 + Vite. Entry point uses the Svelte 5 `mount()` API. Original `src/*.js` library files moved unchanged to `src/lib/`.
+- **Three.js import**: Switched from CDN importmap to npm package (`three@^0.169`).
+
+### Fixed
+- **Reactive loop in G-code tab**: `afterUpdate(() => redraw())` caused `effect_update_depth_exceeded` by firing after every reactive update. Replaced with a single `$:` reactive statement and `onMount` for the initial draw.
+- **Broken `$:` comma expression**: `$: if (previewCanvas && $settings.offsetX, $settings.offsetY)` did not correctly track `offsetY` due to JS comma-operator precedence.
+- **Build errors**: Added `<tbody>` wrappers inside all `<table>` elements (Svelte 5 HTML validity requirement); fixed invalid `on:wheel|passive={false}` directive syntax to `on:wheel|nonpassive|preventDefault`.
+
+## [0.8.0] - 2026-03-27
+
+### Added
+- **G-code import**: Load an existing `.gcode` file to preview and re-send; mm paths converted to NDC for the store.
+- **Test pattern**: Generate a calibration grid pattern directly from the UI without a recording.
+
+## [0.7.0] - 2026-03-25
+
+### Added
+- **Web Serial / GRBL**: Full Web Serial API wrapper for GRBL controller communication at 115200 baud — line-by-line streaming with `ok` acknowledgement, soft-reset (0x18), jog with CoreXY and Swap X/Y support, pen up/down, servo sweep, calibration sweep, and frame trace.
+
+## [0.6.0] - 2026-02-24
+
+### Added
+- **Record FPS**: Configurable frames-per-second capture rate (1–30) for wave recording.
+- **Smoothing**: Adjustable frequency-mode averaging coefficient (0–0.95) for microphone input.
+- **Post-recording adjustment**: Amplitude scale and other parameters can be tweaked after recording without re-capturing.
+
+## [0.5.0] - 2026-02-24
+
+### Added
+- **Settings persistence**: All parameters auto-saved to `localStorage` and restored on reload.
+- **Per-combination presets**: Save and clear a preset per source × shape combination, with a visual indicator when a custom preset is active.
+- **Per-source × shape defaults**: Built-in sensible default parameters for each of the 14 shapes across both sources.
+- **Camera reset**: Button to restore the camera to the default position for the current shape.
+
+## [0.4.0] - 2026-02-22
+
+### Added
+- **Camera controls**: OrbitControls (left drag orbit, right drag pan, scroll zoom) with live Cam Pos / Target display and a Set button for restoring saved views.
+- **G-code export**: Export current wave projection as a GRBL-compatible `.gcode` file.
+- **Deterministic filenames**: Export filenames are three-word names derived from generation parameters — same settings always produce the same name.
+- **Aspect ratio**: Camera aspect ratio stored alongside projected paths for accurate paper-coordinate mapping on export.
+- **Help modal**: Overlay documenting all controls, shapes, and workflow; dismissible with Escape.
+- **README**: Full project description with usage instructions and shape reference.
+
+## [0.3.0] - 2026-02-22
+
+### Added
+- **Landscape shape**: Terrain ridges with opaque filled passes and cross-lines (Joy Division style).
+- **Terrain improvements**: Perspective-correct horizon masking and improved visibility checks for occluded ridges.
+
+## [0.2.0] - 2026-02-21
+
+### Added
+- **Noise generator**: Algorithmic audio source (Perlin fBm, Sine Sum, White Noise) with seed, speed, frequency, octaves, and persistence controls — no microphone required.
+
+## [0.1.0] - 2026-02-22
+
+### Added
+- **Initial release**: Audio Wave Visualizer → G-code. Captures microphone input via the Web Audio API and renders live wave geometry in Three.js across 14 shapes: Linear, Circular, Spiral, Lissajous, Phyllotaxis, Tube, Terrain, Harmonograph, Flow Field, Epicycles, Chladni, Moiré, and Heatmap.
+
+[Unreleased]: https://github.com/user/gcode-wave-visualizer/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/user/gcode-wave-visualizer/compare/v0.8.0...v1.0.0
+[0.8.0]: https://github.com/user/gcode-wave-visualizer/compare/v0.7.0...v0.8.0
+[0.7.0]: https://github.com/user/gcode-wave-visualizer/compare/v0.6.0...v0.7.0
+[0.6.0]: https://github.com/user/gcode-wave-visualizer/compare/v0.5.0...v0.6.0
+[0.5.0]: https://github.com/user/gcode-wave-visualizer/compare/v0.4.0...v0.5.0
+[0.4.0]: https://github.com/user/gcode-wave-visualizer/compare/v0.3.0...v0.4.0
+[0.3.0]: https://github.com/user/gcode-wave-visualizer/compare/v0.2.0...v0.3.0
+[0.2.0]: https://github.com/user/gcode-wave-visualizer/compare/v0.1.0...v0.2.0
+[0.1.0]: https://github.com/user/gcode-wave-visualizer/releases/tag/v0.1.0
