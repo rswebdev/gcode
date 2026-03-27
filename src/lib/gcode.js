@@ -626,15 +626,20 @@ function _ndcScales(aspect = 1, plotW = PLOT_W, plotH = PLOT_H) {
 // sx / sy are the half-extents in mm for each axis (from _ndcScales).
 // ox / oy are optional mm offsets applied after the mapping.
 // dims (optional) overrides center and clamping bounds for non-A4 paper.
-function _ndcToPaper(nx, ny, sx, sy, ox = 0, oy = 0, dims = null) {
+// clamp (default false): when true, constrains output to the plot area.
+//   Leave false for projected/stereo paths (landscape intentionally exceeds bounds).
+//   Pass true for frameGCode bounding-box traces.
+function _ndcToPaper(nx, ny, sx, sy, ox = 0, oy = 0, dims = null, clamp = false) {
   const cx = dims ? dims.cx : CENTER_X;
   const cy = dims ? dims.cy : CENTER_Y;
   const m  = dims ? dims.m  : MARGIN;
   const ow = dims ? dims.ow : PLOT_W;
   const oh = dims ? dims.oh : PLOT_H;
+  const rawX = cx + nx * sx + ox;
+  const rawY = cy + ny * sy + oy;
   return {
-    px: Math.max(m, Math.min(m + ow, cx + nx * sx + ox)),
-    py: Math.max(m, Math.min(m + oh, cy + ny * sy + oy)),
+    px: clamp ? Math.max(m, Math.min(m + ow, rawX)) : rawX,
+    py: clamp ? Math.max(m, Math.min(m + oh, rawY)) : rawY,
   };
 }
 
@@ -719,7 +724,7 @@ export function frameGCode(paths, config = {}) {
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
   for (const path of paths) {
     for (const pt of path) {
-      const { px, py } = _ndcToPaper(pt.nx, pt.ny, sx, sy, offsetX, offsetY, dims);
+      const { px, py } = _ndcToPaper(pt.nx, pt.ny, sx, sy, offsetX, offsetY, dims, true);
       if (px < minX) minX = px;
       if (px > maxX) maxX = px;
       if (py < minY) minY = py;

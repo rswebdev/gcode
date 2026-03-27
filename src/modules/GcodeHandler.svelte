@@ -1,5 +1,5 @@
 <script>
-  import { onMount } from 'svelte';
+  import { onMount, onDestroy } from 'svelte';
   import { get } from 'svelte/store';
   import { settings } from '../stores/settings.js';
   import {
@@ -11,7 +11,74 @@
 
   let previewCanvas;
   let fileInput;
-  let zoomLevel = 1;
+  let zoomLevel  = 1;
+  let showPaths  = true;
+
+  // ---------------------------------------------------------------------------
+  // Playback
+  // ---------------------------------------------------------------------------
+  // A flat sequence of {type:'travel'|'draw', nx1,ny1,nx2,ny2} segments
+  // built from activePaths. Each path starts with a travel from the previous
+  // pen position, then draw segments for each point in the path.
+  let playSeq   = [];   // built lazily from activePaths
+  let playIdx   = 0;    // segments revealed so far
+  let playing   = false;
+  let playSpeed = 5;    // 1–50; moves per frame = playSpeed * 50
+  let playRaf   = null;
+
+  function buildPlaySeq() {
+    const paths = get(activePaths);
+    const seq   = [];
+    let px = 0, py = 0;
+    for (const path of paths) {
+      if (path.length < 1) continue;
+      seq.push({ type: 'travel', nx1: px, ny1: py, nx2: path[0].nx, ny2: path[0].ny });
+      for (let i = 1; i < path.length; i++) {
+        seq.push({
+          type: 'draw',
+          nx1: path[i-1].nx, ny1: path[i-1].ny,
+          nx2: path[i].nx,   ny2: path[i].ny,
+        });
+      }
+      px = path[path.length - 1].nx;
+      py = path[path.length - 1].ny;
+    }
+    return seq;
+  }
+
+  function onPlayToggle() {
+    if (playing) { pausePlay(); return; }
+    if (!playSeq.length) playSeq = buildPlaySeq();
+    if (playIdx >= playSeq.length) playIdx = 0;
+    playing = true;
+    schedulePlayFrame();
+  }
+
+  function pausePlay() {
+    playing = false;
+    if (playRaf) { cancelAnimationFrame(playRaf); playRaf = null; }
+  }
+
+  function resetPlay() {
+    pausePlay();
+    playIdx = 0;
+    playSeq = [];
+    redraw();
+  }
+
+  function schedulePlayFrame() {
+    playRaf = requestAnimationFrame(() => {
+      if (!playing) return;
+      const step = playSpeed * 50;
+      playIdx = Math.min(playIdx + step, playSeq.length);
+      redraw();
+      if (playIdx < playSeq.length) schedulePlayFrame();
+      else playing = false;
+    });
+  }
+
+  // Invalidate play state when paths change
+  $: $activePaths && resetPlay();
 
   const MARGIN = 10;
 
@@ -93,8 +160,8 @@
     const sx = sxR * plotScale;
     const sy = syR * plotScale;
 
-    const ndcToMmX = (nx) => Math.max(MARGIN, Math.min(MARGIN + plotW, centerX + nx * sx + offsetX));
-    const ndcToMmY = (ny) => Math.max(MARGIN, Math.min(MARGIN + plotH, centerY + ny * sy + offsetY));
+    const ndcToMmX = (nx) => centerX + nx * sx + offsetX;
+    const ndcToMmY = (ny) => centerY + ny * sy + offsetY;
 
     // Zoom transform around center
     ctx.save();
@@ -149,23 +216,69 @@
     ctx.font = `${Math.max(8, 10 / zoomLevel)}px monospace`;
     ctx.fillText('X0,Y0', ox + 4, oy - 3);
 
-    // Draw paths
-    const paths = get(activePaths);
-    ctx.strokeStyle = '#00d4ff';
-    ctx.lineWidth   = 0.8;
-    ctx.lineJoin    = 'round';
-    ctx.lineCap     = 'round';
+    // Draw paths / play trace
+    if (playSeq.length > 0 && playIdx > 0) {
+      // Play mode: render accumulated trace up to playIdx
+      const stop = Math.min(playIdx, playSeq.length);
 
-    for (const path of paths) {
-      if (path.length < 2) continue;
+      // Pen-up travels — dashed gray
+      ctx.strokeStyle = 'rgba(120,120,120,0.45)';
+      ctx.lineWidth   = 0.6;
+      ctx.setLineDash([3, 4]);
+      for (let i = 0; i < stop; i++) {
+        const s = playSeq[i];
+        if (s.type !== 'travel') continue;
+        ctx.beginPath();
+        ctx.moveTo(toCanX(ndcToMmX(s.nx1)), toCanY(ndcToMmY(s.ny1)));
+        ctx.lineTo(toCanX(ndcToMmX(s.nx2)), toCanY(ndcToMmY(s.ny2)));
+        ctx.stroke();
+      }
+      ctx.setLineDash([]);
+
+      // Pen-down draws — cyan
+      ctx.strokeStyle = '#00d4ff';
+      ctx.lineWidth   = 0.8;
+      ctx.lineJoin    = 'round';
+      ctx.lineCap     = 'round';
       ctx.beginPath();
-      for (let i = 0; i < path.length; i++) {
-        const { nx, ny } = path[i];
-        const cx = toCanX(ndcToMmX(nx));
-        const cy = toCanY(ndcToMmY(ny));
-        if (i === 0) ctx.moveTo(cx, cy); else ctx.lineTo(cx, cy);
+      for (let i = 0; i < stop; i++) {
+        const s = playSeq[i];
+        if (s.type !== 'draw') continue;
+        const x1 = toCanX(ndcToMmX(s.nx1)), y1 = toCanY(ndcToMmY(s.ny1));
+        const x2 = toCanX(ndcToMmX(s.nx2)), y2 = toCanY(ndcToMmY(s.ny2));
+        if (i === 0 || playSeq[i-1].type !== 'draw') ctx.moveTo(x1, y1);
+        ctx.lineTo(x2, y2);
       }
       ctx.stroke();
+
+      // Current pen position dot
+      const last = playSeq[stop - 1];
+      const dotX = toCanX(ndcToMmX(last.nx2));
+      const dotY = toCanY(ndcToMmY(last.ny2));
+      ctx.fillStyle = '#ff4444';
+      ctx.beginPath();
+      ctx.arc(dotX, dotY, 4 / zoomLevel, 0, Math.PI * 2);
+      ctx.fill();
+
+    } else if (showPaths) {
+      // Static mode: draw all paths at once
+      const paths = get(activePaths);
+      ctx.strokeStyle = '#00d4ff';
+      ctx.lineWidth   = 0.8;
+      ctx.lineJoin    = 'round';
+      ctx.lineCap     = 'round';
+
+      for (const path of paths) {
+        if (path.length < 2) continue;
+        ctx.beginPath();
+        for (let i = 0; i < path.length; i++) {
+          const { nx, ny } = path[i];
+          const cx = toCanX(ndcToMmX(nx));
+          const cy = toCanY(ndcToMmY(ny));
+          if (i === 0) ctx.moveTo(cx, cy); else ctx.lineTo(cx, cy);
+        }
+        ctx.stroke();
+      }
     }
 
     ctx.restore();
@@ -185,9 +298,10 @@
   }
 
   // Redraw whenever paths, aspect, or relevant settings change
-  $: previewCanvas && ($activePaths, $cameraAspect, $settings.offsetX, $settings.offsetY, $settings.importScale, redraw());
+  $: previewCanvas && ($activePaths, $cameraAspect, $settings.offsetX, $settings.offsetY, $settings.importScale, showPaths, redraw());
 
   onMount(() => redraw());
+  onDestroy(() => pausePlay());
 
   function onWheel(e) {
     e.preventDefault();
@@ -384,6 +498,27 @@
       {/if}
     </section>
 
+    <!-- Playback -->
+    <section>
+      <h3>Playback</h3>
+      <div class="btn-group">
+        <button disabled={!$hasPlottablePaths} on:click={onPlayToggle}>
+          {playing ? 'Pause' : playIdx > 0 ? 'Resume' : 'Play'}
+        </button>
+        <button disabled={playIdx === 0} on:click={resetPlay}>Reset</button>
+      </div>
+      <label style="margin-top:6px">
+        Speed
+        <input type="range" min="1" max="50" step="1" bind:value={playSpeed}>
+      </label>
+      {#if playSeq.length > 0}
+        <div class="path-info">
+          {playIdx.toLocaleString()} / {playSeq.length.toLocaleString()} moves
+          · {$activePaths.length} lifts
+        </div>
+      {/if}
+    </section>
+
     <!-- Paper -->
     <section>
       <h3>Paper</h3>
@@ -425,6 +560,10 @@
         <input type="number" min="0.05" max="5" step="0.05"
                value={$settings.importScale}
                on:input={e => settings.patch({ importScale: +e.target.value })}>
+      </label>
+      <label class="checkbox-label">
+        <input type="checkbox" bind:checked={showPaths}>
+        Show tool path
       </label>
     </section>
 
@@ -536,6 +675,12 @@
     margin-bottom: 5px;
     color: #aaa;
     font-size: 12px;
+  }
+
+  label.checkbox-label {
+    justify-content: flex-start;
+    gap: 6px;
+    cursor: pointer;
   }
 
   .btn-group {
