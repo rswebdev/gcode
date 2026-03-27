@@ -1251,8 +1251,8 @@ function _getLandscapeProjectedPaths() {
     return { nx: rx / rw, ny: ry / rw };
   }
 
-  // Collect wave lines only (skip THREE.Mesh fills), preserve stored order (back-to-front)
-  const lineObjects = waveLines.filter(l => !(l instanceof THREE.Mesh));
+  // Collect wave lines only (skip THREE.Mesh fills and THREE.LineSegments circles)
+  const lineObjects = waveLines.filter(l => l.type === 'Line');
   if (lineObjects.length === 0) return [];
 
   const allPaths = [];
