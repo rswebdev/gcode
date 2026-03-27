@@ -13,16 +13,29 @@
   let fileInput;
   let zoomLevel = 1;
 
-  // Paper dims (mm) from gcode.js constants (mirrored here)
-  const PAPER_W = 210, PAPER_H = 297, MARGIN = 10;
-  const PLOT_W  = 190, PLOT_H  = 277;
-  const CENTER_X = 105, CENTER_Y = 148.5;
+  const MARGIN = 10;
 
-  function ndcScales(aspect) {
-    const paperAspect = PLOT_W / PLOT_H;
+  const PAPER_SIZES = {
+    'A4P':  { w: 210, h: 297, label: 'A4 Portrait'      },
+    'A4L':  { w: 297, h: 210, label: 'A4 Landscape'     },
+    'A3P':  { w: 297, h: 420, label: 'A3 Portrait'      },
+    'A3L':  { w: 420, h: 297, label: 'A3 Landscape'     },
+    'LTRP': { w: 216, h: 279, label: 'Letter Portrait'  },
+    'LTRL': { w: 279, h: 216, label: 'Letter Landscape' },
+  };
+
+  // Current paper dims derived from setting
+  let paper = PAPER_SIZES['A4P'];
+  $: paper = PAPER_SIZES[$settings.paperSize] ?? PAPER_SIZES['A4P'];
+  $: paper && redraw();
+
+  function ndcScales(aspect, pw, ph) {
+    const plotW = pw - 2 * MARGIN;
+    const plotH = ph - 2 * MARGIN;
+    const pa = plotW / plotH;
     let sx, sy;
-    if (aspect >= paperAspect) { sx = PLOT_W / 2; sy = sx / aspect; }
-    else                       { sy = PLOT_H / 2; sx = sy * aspect; }
+    if (aspect >= pa) { sx = plotW / 2; sy = sx / aspect; }
+    else              { sy = plotH / 2; sx = sy * aspect; }
     return { sx, sy };
   }
 
@@ -44,9 +57,16 @@
     ctx.fillStyle = '#0e0e0e';
     ctx.fillRect(0, 0, W, H);
 
-    // Paper area (portrait A4, letterboxed with padding)
+    const s = get(settings);
+    const pw = paper.w, ph = paper.h;
+    const plotW = pw - 2 * MARGIN;
+    const plotH = ph - 2 * MARGIN;
+    const centerX = MARGIN + plotW / 2;
+    const centerY = MARGIN + plotH / 2;
+
+    // Paper area letterboxed with padding
     const pad = 24;
-    const paperAspect = PAPER_W / PAPER_H;
+    const paperAspect = pw / ph;
     let paperW, paperH;
     const availW = W - 2 * pad, availH = H - 2 * pad;
     if (availW / availH >= paperAspect) {
@@ -60,6 +80,22 @@
     const paperLeft = (W - paperW) / 2;
     const paperTop  = (H - paperH) / 2;
 
+    // mm → canvas pixel (Y flipped: plotter Y=0 is at home/bottom, canvas Y=0 is top)
+    const toCanX = (mmX) => paperLeft + (mmX / pw) * paperW;
+    const toCanY = (mmY) => paperTop + paperH - (mmY / ph) * paperH;
+
+    // NDC → mm  (matching gcode.js _ndcToPaper, with plotScale)
+    const aspect     = get(cameraAspect) || 1;
+    const plotScale  = +s.importScale || 1;
+    const offsetX    = +s.offsetX || 0;
+    const offsetY    = +s.offsetY || 0;
+    const { sx: sxR, sy: syR } = ndcScales(aspect, pw, ph);
+    const sx = sxR * plotScale;
+    const sy = syR * plotScale;
+
+    const ndcToMmX = (nx) => Math.max(MARGIN, Math.min(MARGIN + plotW, centerX + nx * sx + offsetX));
+    const ndcToMmY = (ny) => Math.max(MARGIN, Math.min(MARGIN + plotH, centerY + ny * sy + offsetY));
+
     // Zoom transform around center
     ctx.save();
     ctx.translate(W / 2, H / 2);
@@ -69,43 +105,51 @@
     // Paper background + border
     ctx.fillStyle = '#1c1c1c';
     ctx.fillRect(paperLeft, paperTop, paperW, paperH);
+
+    // 1 cm grid
+    ctx.strokeStyle = '#252525';
+    ctx.lineWidth = 0.5;
+    ctx.beginPath();
+    for (let x = 10; x < pw; x += 10) {
+      const cx = toCanX(x);
+      ctx.moveTo(cx, paperTop);
+      ctx.lineTo(cx, paperTop + paperH);
+    }
+    for (let y = 10; y < ph; y += 10) {
+      const cy = toCanY(y);
+      ctx.moveTo(paperLeft, cy);
+      ctx.lineTo(paperLeft + paperW, cy);
+    }
+    ctx.stroke();
+
     ctx.strokeStyle = '#444';
     ctx.lineWidth = 1;
     ctx.strokeRect(paperLeft, paperTop, paperW, paperH);
 
     // Plot area boundary (MARGIN inset)
-    const marginFracX = MARGIN / PAPER_W;
-    const marginFracY = MARGIN / PAPER_H;
     ctx.strokeStyle = '#333';
     ctx.setLineDash([4, 4]);
     ctx.strokeRect(
-      paperLeft  + marginFracX * paperW,
-      paperTop   + marginFracY * paperH,
-      paperW * PLOT_W / PAPER_W,
-      paperH * PLOT_H / PAPER_H,
+      toCanX(MARGIN), toCanY(MARGIN + plotH),
+      (plotW / pw) * paperW,
+      (plotH / ph) * paperH,
     );
     ctx.setLineDash([]);
 
-    // Map NDC → canvas coords  (Three.js: ny=+1 = top of viewport)
-    // NDC ±1 maps to the plot area (MARGIN..PAPER-MARGIN in mm)
-    const s = get(settings);
-    const aspect = get(cameraAspect) || 1;
-    const { sx, sy } = ndcScales(aspect);
-    const offsetX = +s.offsetX || 0;
-    const offsetY = +s.offsetY || 0;
+    // X0,Y0 origin marker at paper corner (0,0)
+    const ox = toCanX(0), oy = toCanY(0);
+    const armLen = 8;
+    ctx.strokeStyle = '#665500';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(ox - armLen, oy); ctx.lineTo(ox + armLen, oy);
+    ctx.moveTo(ox, oy - armLen); ctx.lineTo(ox, oy + armLen);
+    ctx.stroke();
+    ctx.fillStyle = '#aa8800';
+    ctx.font = `${Math.max(8, 10 / zoomLevel)}px monospace`;
+    ctx.fillText('X0,Y0', ox + 4, oy - 3);
 
-    // mm → canvas pixel
-    const toCanX = (mmX) => paperLeft + (mmX / PAPER_W) * paperW;
-    const toCanY = (mmY) => paperTop  + (mmY / PAPER_H) * paperH;
-
-    // NDC → mm  (matching gcode.js _ndcToPaper)
-    // py = CENTER_Y + ny*sy + offsetY  (note: no Y flip — Three.js Y-up maps to plotter Y-up)
-    // But canvas Y-down, paper Y measured from top:
-    //   plotter Y increases AWAY from home (i.e. up the page in "canonical" view)
-    //   for the preview we'll just show paper with Y=0 at top
-    const ndcToMmX = (nx) => Math.max(MARGIN, Math.min(MARGIN + PLOT_W, CENTER_X + nx * sx + offsetX));
-    const ndcToMmY = (ny) => Math.max(MARGIN, Math.min(MARGIN + PLOT_H, CENTER_Y + ny * sy + offsetY));
-
+    // Draw paths
     const paths = get(activePaths);
     ctx.strokeStyle = '#00d4ff';
     ctx.lineWidth   = 0.8;
@@ -126,16 +170,22 @@
 
     ctx.restore();
 
-    // Zoom indicator
+    // HUD: zoom + paper size indicator
+    ctx.fillStyle = '#555';
+    ctx.font = '11px monospace';
+    const hudR = W - 8;
+    const hudY = H - 8;
     if (zoomLevel !== 1) {
-      ctx.fillStyle = '#555';
-      ctx.font = '11px monospace';
-      ctx.fillText(`${Math.round(zoomLevel * 100)}%`, W - 46, H - 8);
+      ctx.textAlign = 'right';
+      ctx.fillText(`${Math.round(zoomLevel * 100)}%`, hudR, hudY);
     }
+    ctx.textAlign = 'left';
+    ctx.fillStyle = '#444';
+    ctx.fillText(`${pw}×${ph}mm`, 10, H - 8);
   }
 
   // Redraw whenever paths, aspect, or relevant settings change
-  $: previewCanvas && ($activePaths, $cameraAspect, $settings.offsetX, $settings.offsetY, redraw());
+  $: previewCanvas && ($activePaths, $cameraAspect, $settings.offsetX, $settings.offsetY, $settings.importScale, redraw());
 
   onMount(() => redraw());
 
@@ -166,19 +216,22 @@
         statusText = 'No drawable G1 XY paths found'; statusClass = '';
         return;
       }
-      // For import: paths are already in mm, but the gcode store expects NDC paths.
-      // Show them using an identity-ish mapping: mm → NDC via the paper center.
-      // Convert mm paths → NDC using inverse of _ndcToPaper (with aspect=1)
+      // Convert mm paths → NDC using current paper dims
+      const pw = paper.w, ph = paper.h;
+      const plotW = pw - 2 * MARGIN;
+      const plotH = ph - 2 * MARGIN;
+      const cx = MARGIN + plotW / 2;
+      const cy = MARGIN + plotH / 2;
       const ndcPaths = paths.map(path =>
         path.map(({ x, y }) => ({
-          nx: (x - CENTER_X) / (PLOT_W / 2),
-          ny: (y - CENTER_Y) / (PLOT_H / 2),
+          nx: (x - cx) / (plotW / 2),
+          ny: (y - cy) / (plotH / 2),
         }))
       );
       importedPathCount.set(paths.length);
       activePaths.set(ndcPaths);
       stereoPaths.set(null);
-      cameraAspect.set(PLOT_W / PLOT_H); // match paper aspect for import
+      cameraAspect.set(plotW / plotH);
       exportParams.set(null);
       statusText  = `Imported ${paths.length} paths (${stats.draws} draw moves)`;
       statusClass = 'done';
@@ -190,26 +243,65 @@
   }
 
   function onTestPattern() {
-    try {
-      const content = gcode.generateCalibrationPattern(50, 10, 60, 60);
-      const { paths, stats } = gcode.parseGCodePaths(content);
-      if (!paths.length) { statusText = 'Test pattern failed'; return; }
-      const ndcPaths = paths.map(path =>
-        path.map(({ x, y }) => ({
-          nx: (x - CENTER_X) / (PLOT_W / 2),
-          ny: (y - CENTER_Y) / (PLOT_H / 2),
-        }))
-      );
-      importedPathCount.set(paths.length);
-      activePaths.set(ndcPaths);
-      stereoPaths.set(null);
-      cameraAspect.set(PLOT_W / PLOT_H);
-      exportParams.set(null);
-      statusText  = `Loaded test pattern: ${paths.length} paths (${stats.draws} draw moves)`;
-      statusClass = 'done';
-    } catch (err) {
-      statusText = `Test pattern failed: ${err?.message ?? err}`; statusClass = 'err';
+    const pw = paper.w, ph = paper.h;
+    const plotW = pw - 2 * MARGIN;
+    const plotH = ph - 2 * MARGIN;
+    const cx = MARGIN + plotW / 2;
+    const cy = MARGIN + plotH / 2;
+
+    // With testAspect = plotW/plotH, NDC (±1, ±1) maps exactly to the plot
+    // area corners — no letterboxing, clean 1:1 NDC-to-paper correspondence.
+    const testAspect = plotW / plotH;
+    const nx = x => (x - cx) / (plotW / 2);
+    const ny = y => (y - cy) / (plotH / 2);
+    const pt = (x, y) => ({ nx: nx(x), ny: ny(y) });
+
+    const paths = [];
+
+    // 1. Plot area boundary — should match the dashed preview rect exactly
+    paths.push([
+      pt(MARGIN,        MARGIN),
+      pt(MARGIN+plotW,  MARGIN),
+      pt(MARGIN+plotW,  MARGIN+plotH),
+      pt(MARGIN,        MARGIN+plotH),
+      pt(MARGIN,        MARGIN),
+    ]);
+
+    // 2. Center cross (20 mm arms each direction)
+    paths.push([ pt(cx-20, cy),       pt(cx+20, cy) ]);
+    paths.push([ pt(cx,    cy-20),    pt(cx,    cy+20) ]);
+
+    // 3. Origin L-mark — 40 mm legs from the bottom-left plot corner.
+    //    Should appear in the BOTTOM-LEFT of the paper. If axes are swapped
+    //    or Y is flipped, this mark will appear in the wrong corner.
+    const L = 40;
+    paths.push([
+      pt(MARGIN+L, MARGIN),
+      pt(MARGIN,   MARGIN),
+      pt(MARGIN,   MARGIN+L),
+    ]);
+
+    // 4. Scale ticks — 10 mm tall ticks every 50 mm along the bottom edge
+    for (let x = MARGIN+50; x < MARGIN+plotW; x += 50) {
+      paths.push([ pt(x, MARGIN), pt(x, MARGIN+10) ]);
     }
+
+    // 5. Scale ticks — 10 mm wide ticks every 50 mm up the left edge
+    for (let y = MARGIN+50; y < MARGIN+plotH; y += 50) {
+      paths.push([ pt(MARGIN, y), pt(MARGIN+10, y) ]);
+    }
+
+    // 6. Diagonal — bottom-left to top-right; on portrait paper this should
+    //    be a steep line. A shallow diagonal means axes look swapped/rotated.
+    paths.push([ pt(MARGIN, MARGIN), pt(MARGIN+plotW, MARGIN+plotH) ]);
+
+    importedPathCount.set(0);
+    activePaths.set(paths);
+    stereoPaths.set(null);
+    cameraAspect.set(testAspect);
+    exportParams.set(null);
+    statusText  = `Test pattern loaded — ${paths.length} paths`;
+    statusClass = 'done';
   }
 
   // ---------------------------------------------------------------------------
@@ -230,6 +322,9 @@
       coreXY:          s.jogCoreXY || false,
       offsetX:         +s.offsetX  || 0,
       offsetY:         +s.offsetY  || 0,
+      plotScale:       +s.importScale || 1,
+      paperW:          paper.w,
+      paperH:          paper.h,
       aspect:          get(cameraAspect) || 1,
       params,
     };
@@ -289,6 +384,20 @@
       {/if}
     </section>
 
+    <!-- Paper -->
+    <section>
+      <h3>Paper</h3>
+      <label>
+        Size
+        <select value={$settings.paperSize}
+                on:change={e => settings.patch({ paperSize: e.target.value })}>
+          {#each Object.entries(PAPER_SIZES) as [key, p]}
+            <option value={key}>{p.label}</option>
+          {/each}
+        </select>
+      </label>
+    </section>
+
     <!-- G-code settings -->
     <section>
       <h3>G-code Settings</h3>
@@ -312,46 +421,26 @@
                on:input={e => settings.patch({ offsetY: +e.target.value })}>
       </label>
       <label>
-        Import Scale
-        <input type="number" min="0.1" max="10" step="0.1"
+        Plot Scale
+        <input type="number" min="0.05" max="5" step="0.05"
                value={$settings.importScale}
-               on:change={e => settings.patch({ importScale: +e.target.value })}>
+               on:input={e => settings.patch({ importScale: +e.target.value })}>
       </label>
     </section>
 
     <section>
-      <h3>Pen</h3>
-      <label>
-        Pen Mode
-        <select value={$settings.penMode}
-                on:change={e => settings.patch({ penMode: e.target.value })}>
-          <option value="z">Z axis</option>
-          <option value="servo">Servo (M3)</option>
-        </select>
-      </label>
-      {#if $settings.penMode === 'z'}
-        <label>Pen Up Z
-          <input type="number" min="-20" max="20" step="0.5"
-                 value={$settings.penUpZ}
-                 on:change={e => settings.patch({ penUpZ: +e.target.value })}></label>
-        <label>Pen Down Z
-          <input type="number" min="-20" max="20" step="0.5"
-                 value={$settings.penDownZ}
-                 on:change={e => settings.patch({ penDownZ: +e.target.value })}></label>
-      {:else}
-        <label>Servo Up S
-          <input type="number" min="0" max="1000" step="5"
-                 value={$settings.penUpS}
-                 on:change={e => settings.patch({ penUpS: +e.target.value })}></label>
-        <label>Servo Down S
-          <input type="number" min="0" max="1000" step="5"
-                 value={$settings.penDownS}
-                 on:change={e => settings.patch({ penDownS: +e.target.value })}></label>
-        <label>Servo Y Comp
-          <input type="number" min="-10" max="10" step="0.1"
-                 value={$settings.penYComp}
-                 on:change={e => settings.patch({ penYComp: +e.target.value })}></label>
-      {/if}
+      <h3>Pen <span class="section-hint">(set in Serial tab)</span></h3>
+      <div class="pen-info">
+        <span>{$settings.penMode === 'z' ? 'Z axis' : 'Servo (M3)'}</span>
+        {#if $settings.penMode === 'z'}
+          <span>Up Z: {$settings.penUpZ}</span>
+          <span>Down Z: {$settings.penDownZ}</span>
+        {:else}
+          <span>Up S: {$settings.penUpS}</span>
+          <span>Down S: {$settings.penDownS}</span>
+          <span>Y Comp: {$settings.penYComp}</span>
+        {/if}
+      </div>
     </section>
 
     <!-- Info -->
@@ -462,6 +551,21 @@
   .status.err  { color: #ff6666; }
 
   .path-info {
+    font-size: 11px;
+    color: #555;
+  }
+
+  .section-hint {
+    font-size: 9px;
+    color: #444;
+    text-transform: none;
+    letter-spacing: 0;
+  }
+
+  .pen-info {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 10px;
     font-size: 11px;
     color: #555;
   }
