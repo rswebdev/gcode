@@ -477,16 +477,24 @@ export function projectedPathsToGCode(paths, config = {}) {
   const coreXY      = !!config.coreXY;
   const offsetX     = config.offsetX ?? 0;
   const offsetY     = config.offsetY ?? 0;
-  const { sx, sy }  = _ndcScales(config.aspect ?? 1);
-  const penOpts     = { penMode, penUpZ, penDownZ, penDownFeed, penUpS, penDownS, penYComp };
+  const plotScale   = config.plotScale ?? 1;
+  const dims        = _paperCtx(config);
+  const ow = dims ? dims.ow : PLOT_W;
+  const oh = dims ? dims.oh : PLOT_H;
+  const { sx: sxR, sy: syR } = _ndcScales(config.aspect ?? 1, ow, oh);
+  const sx = sxR * plotScale;
+  const sy = syR * plotScale;
+  const penOpts = { penMode, penUpZ, penDownZ, penDownFeed, penUpS, penDownS, penYComp };
 
   const lines = [];
   const ts = new Date().toISOString();
+  const pw = config.paperW ?? PAPER_W;
+  const ph = config.paperH ?? PAPER_H;
 
   lines.push(`; Audio Wave Visualizer - Scene Projection G-code`);
   lines.push(`; Paths: ${paths.length} | Generated: ${ts}`);
-  lines.push(`; Paper: A4 (${PAPER_W}x${PAPER_H}mm), ${MARGIN}mm margins`);
-  lines.push(`; Plot area: ${PLOT_W} x ${PLOT_H} mm`);
+  lines.push(`; Paper: ${pw}x${ph}mm, ${config.margin ?? MARGIN}mm margins`);
+  lines.push(`; Plot area: ${ow} x ${oh} mm`);
   _writeParams(lines, config.params);
   lines.push(`G21          ; Units: millimetres`);
   lines.push(`G90          ; Absolute positioning`);
@@ -497,12 +505,12 @@ export function projectedPathsToGCode(paths, config = {}) {
     if (path.length < 2) continue;
 
     // Map first point and rapid move to it (pen up).
-    const { px: x0, py: y0 } = _ndcToPaper(path[0].nx, path[0].ny, sx, sy, offsetX, offsetY);
+    const { px: x0, py: y0 } = _ndcToPaper(path[0].nx, path[0].ny, sx, sy, offsetX, offsetY, dims);
     lines.push(`G0 ${_xy(x0, y0, coreXY)}`);
     _penDown(lines, penOpts, y0);
 
     for (let i = 1; i < path.length; i++) {
-      const { px, py } = _ndcToPaper(path[i].nx, path[i].ny, sx, sy, offsetX, offsetY);
+      const { px, py } = _ndcToPaper(path[i].nx, path[i].ny, sx, sy, offsetX, offsetY, dims);
       lines.push(`G1 ${_xy(px, py, coreXY)} F${feedRate}`);
     }
 
@@ -541,8 +549,14 @@ export function stereoPathsToGCode(leftPaths, rightPaths, config = {}) {
   const coreXY      = !!config.coreXY;
   const offsetX     = config.offsetX ?? 0;
   const offsetY     = config.offsetY ?? 0;
-  const { sx, sy }  = _ndcScales(config.aspect ?? 1);
-  const penOpts     = { penMode, penUpZ, penDownZ, penDownFeed, penUpS, penDownS, penYComp };
+  const plotScale   = config.plotScale ?? 1;
+  const dims        = _paperCtx(config);
+  const ow = dims ? dims.ow : PLOT_W;
+  const oh = dims ? dims.oh : PLOT_H;
+  const { sx: sxR, sy: syR } = _ndcScales(config.aspect ?? 1, ow, oh);
+  const sx = sxR * plotScale;
+  const sy = syR * plotScale;
+  const penOpts = { penMode, penUpZ, penDownZ, penDownFeed, penUpS, penDownS, penYComp };
 
   const lines = [];
   const ts = new Date().toISOString();
@@ -562,11 +576,11 @@ export function stereoPathsToGCode(leftPaths, rightPaths, config = {}) {
   function _writePaths(paths) {
     for (const path of paths) {
       if (path.length < 2) continue;
-      const { px: x0, py: y0 } = _ndcToPaper(path[0].nx, path[0].ny, sx, sy, offsetX, offsetY);
+      const { px: x0, py: y0 } = _ndcToPaper(path[0].nx, path[0].ny, sx, sy, offsetX, offsetY, dims);
       lines.push(`G0 ${_xy(x0, y0, coreXY)}`);
       _penDown(lines, penOpts, y0);
       for (let i = 1; i < path.length; i++) {
-        const { px, py } = _ndcToPaper(path[i].nx, path[i].ny, sx, sy, offsetX, offsetY);
+        const { px, py } = _ndcToPaper(path[i].nx, path[i].ny, sx, sy, offsetX, offsetY, dims);
         lines.push(`G1 ${_xy(px, py, coreXY)} F${feedRate}`);
       }
       _penUp(lines, penOpts);
@@ -594,16 +608,15 @@ export function stereoPathsToGCode(leftPaths, rightPaths, config = {}) {
 // Compute half-extents (mm) for NDC → paper mapping that preserves the
 // viewport aspect ratio via a "contain" fit (like CSS object-fit: contain).
 // aspect = canvas_width / canvas_height (from camera.aspect).
-function _ndcScales(aspect = 1) {
-  const paperAspect = PLOT_W / PLOT_H;   // ~0.686 for A4 portrait
+// Accept optional plotW/plotH overrides (default: A4 plot area).
+function _ndcScales(aspect = 1, plotW = PLOT_W, plotH = PLOT_H) {
+  const paperAspect = plotW / plotH;
   let sx, sy;
   if (aspect >= paperAspect) {
-    // viewport is wider than paper → x fills PLOT_W, y is proportionally smaller
-    sx = PLOT_W / 2;
+    sx = plotW / 2;
     sy = sx / aspect;
   } else {
-    // viewport is taller than paper → y fills PLOT_H, x is proportionally smaller
-    sy = PLOT_H / 2;
+    sy = plotH / 2;
     sx = sy * aspect;
   }
   return { sx, sy };
@@ -612,10 +625,29 @@ function _ndcScales(aspect = 1) {
 // Map NDC (-1..+1) to paper coordinates (mm), centred on the paper.
 // sx / sy are the half-extents in mm for each axis (from _ndcScales).
 // ox / oy are optional mm offsets applied after the mapping.
-function _ndcToPaper(nx, ny, sx, sy, ox = 0, oy = 0) {
-  const px = clampX(CENTER_X + nx * sx + ox);
-  const py = clampY(CENTER_Y + ny * sy + oy);
-  return { px, py };
+// dims (optional) overrides center and clamping bounds for non-A4 paper.
+function _ndcToPaper(nx, ny, sx, sy, ox = 0, oy = 0, dims = null) {
+  const cx = dims ? dims.cx : CENTER_X;
+  const cy = dims ? dims.cy : CENTER_Y;
+  const m  = dims ? dims.m  : MARGIN;
+  const ow = dims ? dims.ow : PLOT_W;
+  const oh = dims ? dims.oh : PLOT_H;
+  return {
+    px: Math.max(m, Math.min(m + ow, cx + nx * sx + ox)),
+    py: Math.max(m, Math.min(m + oh, cy + ny * sy + oy)),
+  };
+}
+
+// Build paper context for non-default paper sizes.
+// Returns null when config has no paperW/H (keeps using module constants = no overhead).
+function _paperCtx(config) {
+  const m  = config.margin  ?? MARGIN;
+  const pw = config.paperW  ?? PAPER_W;
+  const ph = config.paperH  ?? PAPER_H;
+  if (pw === PAPER_W && ph === PAPER_H && m === MARGIN) return null;
+  const ow = pw - 2 * m;
+  const oh = ph - 2 * m;
+  return { m, ow, oh, cx: m + ow / 2, cy: m + oh / 2 };
 }
 
 // ---------------------------------------------------------------------------
@@ -675,13 +707,19 @@ export function frameGCode(paths, config = {}) {
   const penUpZ  = config.penUpZ  ?? 5;
   const penUpS  = config.penUpS  ?? 80;
   const penOpts = { penMode, penUpZ, penDownZ: 0, penDownFeed: 300, penUpS, penDownS: 50 };
-  const { sx, sy } = _ndcScales(config.aspect ?? 1);
+  const plotScale = config.plotScale ?? 1;
+  const dims    = _paperCtx(config);
+  const ow = dims ? dims.ow : PLOT_W;
+  const oh = dims ? dims.oh : PLOT_H;
+  const { sx: sxR, sy: syR } = _ndcScales(config.aspect ?? 1, ow, oh);
+  const sx = sxR * plotScale;
+  const sy = syR * plotScale;
 
   // Compute bounding box across all path points.
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
   for (const path of paths) {
     for (const pt of path) {
-      const { px, py } = _ndcToPaper(pt.nx, pt.ny, sx, sy, offsetX, offsetY);
+      const { px, py } = _ndcToPaper(pt.nx, pt.ny, sx, sy, offsetX, offsetY, dims);
       if (px < minX) minX = px;
       if (px > maxX) maxX = px;
       if (py < minY) minY = py;

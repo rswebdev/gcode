@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-03-27
+
+### Added
+- **Paper size selector**: G-code preview and export now support A4 Portrait/Landscape, A3 Portrait/Landscape, and Letter Portrait/Landscape via a dropdown; paper dimensions thread through to the generated G-code for WYSIWYG output.
+- **WYSIWYG plot scale**: Plot Scale (0.05–5) now scales both the canvas preview and the exported G-code identically.
+- **Origin marker**: X0,Y0 crosshair rendered at the plotter home corner of the preview canvas.
+- **1 cm grid lines**: Subtle 10 mm guide lines drawn across the preview canvas for visual measurement.
+- **Diagnostic test pattern**: "Test Pattern" button now generates a plot-area border, centre cross, L-mark at the origin, 50 mm scale ticks along both edges, and a diagonal — sufficient to verify coordinate system, axis orientation, and scale without a full wave recording.
+- **Pen settings in Serial tab**: Pen mode, Up/Down Z and servo values are now editable in the Serial tab; the G-code tab displays them read-only.
+- **CoreXY gcode setting**: New "CoreXY gcode" checkbox in the Plot panel applies the A=X+Y / B=X−Y motor transform to generated G-code, independent of the jog "CoreXY" toggle.
+
+### Fixed
+- **Mirrored Y-axis**: Preview canvas was rendering paths upside-down; `toCanY` now correctly flips plotter Y (origin at home/bottom) to canvas Y (origin at top).
+- **Margin boundary after Y-flip**: Plot area dashed rectangle was drawn at the top of the canvas instead of the bottom after the Y-axis correction.
+- **CoreXY double-transform**: When "CoreXY" was enabled for jog, it was also applied to G-code output, causing a 45° rotation and out-of-bounds moves that triggered GRBL alarms.
+- **Gcode streaming timeout**: Per-line timeout now scales with estimated move execution time (5× for G1, 3× carry-forward for G4/M3 that must wait for the planner to drain), preventing false timeouts on long moves or synchronous G4 dwells.
+
 ## [1.0.0] - 2026-03-27
 
 ### Added

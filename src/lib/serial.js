@@ -20,6 +20,7 @@ let _port    = null;
 let _reader  = null;
 let _writer  = null;
 let _rxBuf   = '';
+let _rxNotify = null;   // resolve() of the current _readUntilOk waiter
 let _sending    = false;  // true while sendGCode() is running
 let _cmdPending = false;  // true while sendCommand() is awaiting its ok
 let _cancelReq  = false;
@@ -71,7 +72,23 @@ export async function connect() {
   _writer = _port.writable.getWriter();
   _reader = _port.readable.getReader();
   _rxBuf  = '';
+  _rxNotify = null;
+  _startReaderLoop();
   _emit('info', 'Connected — 115200 baud');
+}
+
+// Persistent background loop: the only place _reader.read() is ever called.
+// Data arrives here regardless of whether _readUntilOk is currently waiting,
+// so nothing is ever dropped on a timeout.
+async function _startReaderLoop() {
+  try {
+    while (_reader) {
+      const { value, done } = await _reader.read();
+      if (done) break;
+      _rxBuf += new TextDecoder().decode(value);
+      if (_rxNotify) { const fn = _rxNotify; _rxNotify = null; fn(); }
+    }
+  } catch (_) { /* port closed */ }
 }
 
 /**
@@ -81,12 +98,14 @@ export async function connect() {
  */
 export async function disconnect() {
   _cancelReq = true;
+  const notify = _rxNotify; _rxNotify = null;
   try { if (_reader) await _reader.cancel(); } catch (_) {}
   try { if (_reader) _reader.releaseLock();  } catch (_) {}
   try { if (_writer) _writer.releaseLock();  } catch (_) {}
   try { if (_port)   await _port.close();    } catch (_) {}
   _port = null; _reader = null; _writer = null; _rxBuf = '';
   _sending = false; _cmdPending = false;
+  notify?.();   // wake any _readUntilOk waiter so it exits cleanly
   _emit('info', 'Disconnected');
 }
 
@@ -127,17 +146,12 @@ async function _readUntilOk(timeoutMs = 10_000) {
     const remaining = deadline - Date.now();
     if (remaining <= 0) throw new Error('Timeout waiting for GRBL response');
 
-    // Race the reader against the wall-clock deadline so _cmdPending/_sending
-    // are always released even if GRBL stops responding.
-    const result = await Promise.race([
-      _reader.read(),
-      new Promise((_, reject) =>
-        setTimeout(() => reject(new Error('Timeout waiting for GRBL response')), remaining)
-      ),
-    ]);
-
-    if (result.done) throw new Error('Serial port closed during receive');
-    _rxBuf += new TextDecoder().decode(result.value);
+    // Wait for the background reader loop to push new bytes into _rxBuf.
+    // Only one waiter at a time; the loop calls _rxNotify() on each chunk.
+    await new Promise((resolve, reject) => {
+      const id = setTimeout(() => reject(new Error('Timeout waiting for GRBL response')), remaining);
+      _rxNotify = () => { clearTimeout(id); resolve(); };
+    });
   }
 }
 
@@ -169,11 +183,38 @@ export async function sendGCode(gcodeString, onProgress) {
     .filter(l => l.length > 0);
 
   let cancelled = false;
+  let pos = { x: 0, y: 0 };
+  let feedRate = 3000;
+  let pendingMotionMs = 0; // estimated execution time of last G1 still in planner
   try {
     for (let i = 0; i < lines.length; i++) {
       if (_cancelReq) { cancelled = true; break; }
-      await _write(lines[i] + '\n');
-      await _readUntilOk();
+      const line = lines[i];
+      const upper = line.toUpperCase();
+      const xm = upper.match(/X([-\d.]+)/);
+      const ym = upper.match(/Y([-\d.]+)/);
+      const fm = upper.match(/F([\d.]+)/);
+      const newX = xm ? +xm[1] : pos.x;
+      const newY = ym ? +ym[1] : pos.y;
+      if (fm) feedRate = +fm[1];
+
+      let timeoutMs;
+      if (/^G1\b/i.test(line) && feedRate > 0) {
+        // G1: accumulate estimated execution time across consecutive moves.
+        // Use 5× safety margin to account for acceleration ramps.
+        const dist = Math.hypot(newX - pos.x, newY - pos.y);
+        pendingMotionMs += (dist / feedRate) * 60_000;
+        timeoutMs = Math.max(15_000, pendingMotionMs * 5);
+      } else {
+        // Non-motion commands (M3, G4, …) may wait for the planner to drain
+        // before responding (synchronous G4, spindle spin-up delays, etc.).
+        timeoutMs = Math.max(15_000, pendingMotionMs * 3);
+        if (/^G4\b/i.test(line)) pendingMotionMs = 0; // G4 is a sync barrier
+      }
+
+      pos = { x: newX, y: newY };
+      await _write(line + '\n');
+      await _readUntilOk(timeoutMs);
       if (onProgress) onProgress(i + 1, lines.length);
     }
   } finally {
