@@ -22,6 +22,7 @@ pnpm-debug.log*
 # Editor
 .vscode/settings.json
 .idea/
+.claude/plan.md
 *.suo
 *.ntvs*
 *.njsproj
