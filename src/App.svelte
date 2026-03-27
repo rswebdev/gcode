@@ -86,6 +86,7 @@
       <tr><td>Chladni</td><td>Nodal-line patterns from resonance modes.</td></tr>
       <tr><td>Moiré</td><td>Offset concentric rings producing moiré fringes.</td></tr>
       <tr><td>Heatmap</td><td>Frequency spectrogram grid with cross-hatch density.</td></tr>
+      <tr><td>Quantized Noise</td><td>Joy Division ridges with stepped amplitude bands; colored hatch fills in the largest gap regions.</td></tr>
     </tbody></table>
 
     <h3>Advanced — Data</h3>

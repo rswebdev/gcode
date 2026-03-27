@@ -6,28 +6,30 @@ A real-time audio visualization tool that generates pen-plotter G-code from soun
 
 ## What it does
 
-Audio is captured at 10 fps and projected through one of thirteen visualization shapes into a Three.js 3D scene. Once recording stops, the current camera view is applied to the scene as a perspective projection, and the visible geometry is exported as G-code with correct aspect-ratio mapping to A4 paper (no stretch, no distortion). Anaglyph stereo export generates a two-pass file for red-cyan 3D glasses.
+Audio is captured at 10 fps and projected through one of fifteen visualization shapes into a Three.js 3D scene. Once recording stops, the current camera view is applied to the scene as a perspective projection, and the visible geometry is exported as G-code with correct aspect-ratio mapping to A4 paper (no stretch, no distortion). Anaglyph stereo export generates a two-pass file for red-cyan 3D glasses.
 
 ---
 
 ## Quick start
 
 ```
-npx serve .
+npm install
+npm run dev
 ```
 
-Open in a browser. No build step, no npm install — pure ES6 modules loaded from a CDN importmap.
+Open the URL shown in the terminal (typically `http://localhost:5174`).
 
 1. Choose **Source** (Noise Generator for no microphone) and **Shape**
-2. Click **Record** — captures up to Max Frames at 10 fps, auto-stops
+2. Click **Record** — captures up to Max Frames at the configured fps, auto-stops
 3. Orbit the 3D view (left drag = orbit, right drag = pan, scroll = zoom)
-4. Click **Export G-code** — downloads a `.gcode` file ready for your plotter
+4. Click **Pattern → G-code**, then switch to the **G-code** tab
+5. Click **Export G-code** — downloads a `.gcode` file ready for your plotter
 
 ---
 
 ## Shapes
 
-Thirteen visualization modes, each mapping audio frames to a different 3D geometry.
+Fifteen visualization modes, each mapping audio frames to a different 3D geometry.
 
 | Shape | Description |
 |---|---|
@@ -44,6 +46,8 @@ Thirteen visualization modes, each mapping audio frames to a different 3D geomet
 | **Epicycles** | Frozen DFT arm snapshots per frame; Fourier decomposition visualized |
 | **Chladni** | Nodal-line tick marks from resonance mode equations |
 | **Moiré** | Two offset families of concentric rings producing interference fringes |
+| **Heatmap** | Frequency spectrogram grid; amplitude controls circle radius per cell |
+| **Quantized Noise** | Joy Division ridges with amplitudes snapped to 8 discrete bands; the three largest sky-gap regions are filled with colored hatch lines |
 
 ---
 
@@ -102,6 +106,17 @@ Hidden behind **Advanced ▸** to keep the default view simple.
 
 ---
 
+## Playback
+
+The G-code tab has a **Play** button that animates the pen path on the 2D preview canvas:
+- Pen-up travel moves appear as dashed grey lines
+- Pen-down draw moves appear in cyan
+- The current pen position is marked with a red dot
+
+Use the **Speed** slider to control how fast the animation runs. Click **Reset** to clear the trace and return to the static path view.
+
+---
+
 ## Project history
 
 ### Origin: wave rows and G-code
@@ -129,8 +144,6 @@ Anaglyph stereo export was added alongside: camera is offset left and right alon
 
 The **Landscape** shape extended Terrain with opaque `THREE.ShapeGeometry` fill polygons rendered in the scene background colour, achieving the layered-silhouette magazine-cover look. `polygonOffset` pushes the fills slightly behind their wave stroke so lines always win the depth test.
 
-Perpendicular crest-connecting lines were added to both Terrain and Landscape: vertical polylines running along each X column across all frames, joining wave crests in the depth direction. Several iterations were needed here — an initial attempt at 3D horizon-masking perpendicular segments proved too aggressive in practice (the strict monotonicity requirement was almost never satisfied), and was replaced with fully unmasked crest polylines that let the fill meshes provide visual occlusion in the 3D view, while the G-code exporter handles screen-space masking separately.
-
 ### Perspective-correct horizon masking
 
 The original terrain horizon algorithm compared world-space Y values — a reasonable approximation for an overhead camera but incorrect for oblique angles. This was replaced with a full perspective-correct approach: the camera's VP matrix projects each world point to NDC, a 512-bucket horizon buffer tracks the maximum NDC-Y per screen-column, and linear interpolation fills any gaps between consecutive projected points. The result handles any camera angle, including strongly oblique views where the horizon line vanishes toward a perspective point.
@@ -155,25 +168,55 @@ Early exports used the shape name and seed in the filename. This was later repla
 
 The G-code projector initially mapped NDC x to the full plot width (190 mm) and NDC y to the full plot height (277 mm) independently, causing a 1.46× vertical stretch on A4 portrait paper. This was first corrected with a uniform square scale, then further refined to read the camera's actual viewport aspect ratio (`camera.aspect`) and apply a **contain-fit**: if the viewport is wider than A4, x fills the plot width and y is scaled proportionally; if taller, y fills the plot height. The exported G-code now faithfully reproduces the browser view at plottable scale.
 
+### Svelte 5 + Vite migration
+
+The original single-file vanilla JS app was migrated to a Svelte 5 + Vite project for better state management and component isolation. All three modules (WaveRecorder, GcodeHandler, SerialTransmission) are always-rendered (CSS-toggled, never `{#if}`-unmounted) to preserve live Three.js and AudioContext state across tab switches.
+
+### Heatmap and playback
+
+The **Heatmap** shape added a spectrogram view: samples are grouped into frequency bins per frame and drawn as amplitude-scaled circles on a flat XZ grid — similar to a vinyl record grid viewed from above.
+
+The **Play** feature in the G-code tab animates the pen path: it builds a flat sequence of travel/draw segments, then traces them frame-by-frame with a `requestAnimationFrame` loop, drawing pen-up moves as dashed grey and pen-down moves as cyan with a red dot at the current head position.
+
+### Quantized Noise
+
+The **Quantized Noise** shape quantizes each frame's amplitude to 8 discrete bands (`QUANT_STEP = 4·ampScale / 8`), producing stepped staircase ridge profiles instead of smooth curves. Points below the minimum threshold snap to y=0, creating flat zero corridors. After building all ridges, the three largest sky-gap regions (measured by area between adjacent ridge pairs) are detected and filled with colored accent layers — amber, rose, and teal — both as `THREE.Mesh` fills in the 3D view and as exported horizontal hatch lines in G-code.
+
 ---
 
 ## File structure
 
 ```
-index.html          UI markup and importmap
-style.css           Dark terminal theme
+index.html                    App entry point
 src/
-  main.js           Application loop, UI wiring, state machine
-  visualizer.js     Three.js scene, all 13 shape builders, camera projection
-  gcode.js          G-code generation, NDC→paper mapping, filename hash
-  noise.js          Algorithmic noise source (Perlin, Sine, White)
-  audio.js          Web Audio API microphone wrapper
-  recorder.js       Frame capture and storage
+  main.js                     Svelte 5 mount entry
+  App.svelte                  App shell — tab bar and help modal
+  modules/
+    WaveRecorder.svelte        3D visualizer, shape + source controls, recording
+    GcodeHandler.svelte        G-code 2D preview, export, import, playback animation
+    SerialTransmission.svelte  GRBL serial connection, jog controls, pen calibration
+  stores/
+    settings.js                Persistent settings (Svelte writable store)
+    wave.js                    Recording state (appState, frameCount)
+    gcode.js                   Active paths, stereo paths, export params
+    serial.js                  Serial port connection state
+    ui.js                      Active tab
+  lib/
+    visualizer.js              Three.js scene — all 15 shape builders, camera projection
+    gcode.js                   G-code generation, NDC→paper mapping, filename hash
+    noise.js                   Algorithmic noise source (Perlin, Sine, White)
+    audio.js                   Web Audio API microphone wrapper
+    recorder.js                Frame capture and storage
+tests/
+  smoke.test.js                Playwright smoke tests
 ```
 
 ---
 
 ## Dependencies
 
-- [Three.js](https://threejs.org/) 0.169.0 — 3D rendering, geometry, OrbitControls (CDN importmap, no install)
+- [Three.js](https://threejs.org/) 0.169.0 — 3D rendering, geometry, OrbitControls (via npm)
+- [Svelte](https://svelte.dev/) 5 — component framework
+- [Vite](https://vitejs.dev/) 5 — dev server and bundler
 - Web Audio API — built into all modern browsers
+- [Playwright](https://playwright.dev/) — browser automation for smoke tests
