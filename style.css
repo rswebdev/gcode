@@ -234,6 +234,23 @@ output {
   min-width: 36px;
 }
 
+#controls-scale {
+  display: flex;
+  align-items: flex-end;
+  border-left: 1px solid #1a1a3a;
+  padding-left: 16px;
+}
+
+#controls-scale label {
+  display: flex;
+  flex-direction: column;
+  font-size: 0.68em;
+  gap: 3px;
+  color: #556;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
 #controls-camera {
   display: flex;
   gap: 10px;
