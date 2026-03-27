@@ -1,5 +1,5 @@
 <script>
-  import { afterUpdate } from 'svelte';
+  import { onMount } from 'svelte';
   import { get } from 'svelte/store';
   import { settings } from '../stores/settings.js';
   import {
@@ -134,12 +134,10 @@
     }
   }
 
-  // Redraw whenever paths or settings change
-  $: if (previewCanvas && $activePaths) { redraw(); }
-  $: if (previewCanvas && $cameraAspect) { redraw(); }
-  $: if (previewCanvas && $settings.offsetX, $settings.offsetY) { redraw(); }
+  // Redraw whenever paths, aspect, or relevant settings change
+  $: previewCanvas && ($activePaths, $cameraAspect, $settings.offsetX, $settings.offsetY, redraw());
 
-  afterUpdate(() => { redraw(); });
+  onMount(() => redraw());
 
   function onWheel(e) {
     e.preventDefault();
