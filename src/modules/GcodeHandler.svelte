@@ -11,7 +11,8 @@
 
   let previewCanvas;
   let fileInput;
-  let zoomLevel = 1;
+  let zoomLevel  = 1;
+  let showPaths  = true;
 
   const MARGIN = 10;
 
@@ -150,22 +151,24 @@
     ctx.fillText('X0,Y0', ox + 4, oy - 3);
 
     // Draw paths
-    const paths = get(activePaths);
-    ctx.strokeStyle = '#00d4ff';
-    ctx.lineWidth   = 0.8;
-    ctx.lineJoin    = 'round';
-    ctx.lineCap     = 'round';
+    if (showPaths) {
+      const paths = get(activePaths);
+      ctx.strokeStyle = '#00d4ff';
+      ctx.lineWidth   = 0.8;
+      ctx.lineJoin    = 'round';
+      ctx.lineCap     = 'round';
 
-    for (const path of paths) {
-      if (path.length < 2) continue;
-      ctx.beginPath();
-      for (let i = 0; i < path.length; i++) {
-        const { nx, ny } = path[i];
-        const cx = toCanX(ndcToMmX(nx));
-        const cy = toCanY(ndcToMmY(ny));
-        if (i === 0) ctx.moveTo(cx, cy); else ctx.lineTo(cx, cy);
+      for (const path of paths) {
+        if (path.length < 2) continue;
+        ctx.beginPath();
+        for (let i = 0; i < path.length; i++) {
+          const { nx, ny } = path[i];
+          const cx = toCanX(ndcToMmX(nx));
+          const cy = toCanY(ndcToMmY(ny));
+          if (i === 0) ctx.moveTo(cx, cy); else ctx.lineTo(cx, cy);
+        }
+        ctx.stroke();
       }
-      ctx.stroke();
     }
 
     ctx.restore();
@@ -185,7 +188,7 @@
   }
 
   // Redraw whenever paths, aspect, or relevant settings change
-  $: previewCanvas && ($activePaths, $cameraAspect, $settings.offsetX, $settings.offsetY, $settings.importScale, redraw());
+  $: previewCanvas && ($activePaths, $cameraAspect, $settings.offsetX, $settings.offsetY, $settings.importScale, showPaths, redraw());
 
   onMount(() => redraw());
 
@@ -426,6 +429,10 @@
                value={$settings.importScale}
                on:input={e => settings.patch({ importScale: +e.target.value })}>
       </label>
+      <label class="checkbox-label">
+        <input type="checkbox" bind:checked={showPaths}>
+        Show tool path
+      </label>
     </section>
 
     <section>
@@ -536,6 +543,12 @@
     margin-bottom: 5px;
     color: #aaa;
     font-size: 12px;
+  }
+
+  label.checkbox-label {
+    justify-content: flex-start;
+    gap: 6px;
+    cursor: pointer;
   }
 
   .btn-group {
