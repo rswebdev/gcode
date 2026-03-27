@@ -6,6 +6,15 @@
   import * as serial from '../lib/serial.js';
   import * as gcode  from '../lib/gcode.js';
 
+  const PAPER_SIZES = {
+    'A4P':  { w: 210, h: 297 },
+    'A4L':  { w: 297, h: 210 },
+    'A3P':  { w: 297, h: 420 },
+    'A3L':  { w: 420, h: 297 },
+    'LTRP': { w: 216, h: 279 },
+    'LTRL': { w: 279, h: 216 },
+  };
+
   let statusText  = '';
   let statusClass = '';
   let monitorOpen = false;
@@ -21,6 +30,7 @@
   // ---------------------------------------------------------------------------
   function getConfig() {
     const s = get(settings);
+    const paper = PAPER_SIZES[s.paperSize] ?? PAPER_SIZES['A4P'];
     return {
       feedRate:  Math.max(100, Math.min(10000, +s.feedRate  || 3000)),
       penMode:   s.penMode  || 'z',
@@ -29,11 +39,14 @@
       penUpS:    +s.penUpS  || 80,
       penDownS:  +s.penDownS || 50,
       penYComp:  +s.penYComp || 0,
-      coreXY:    s.jogCoreXY || false,
+      coreXY:    s.gcodeCoreXY || false,
       calYMax:   +s.calYMax  || 260,
       calYStep:  +s.calYStep || 20,
       offsetX:   +s.offsetX  || 0,
       offsetY:   +s.offsetY  || 0,
+      paperW:    paper.w,
+      paperH:    paper.h,
+      plotScale: +s.importScale || 1,
     };
   }
 
@@ -91,6 +104,7 @@
       const content = gcode.frameGCode(paths, {
         penUpZ: cfg.penUpZ, penUpS: cfg.penUpS, penMode: cfg.penMode,
         coreXY: cfg.coreXY, offsetX: cfg.offsetX, offsetY: cfg.offsetY, aspect,
+        paperW: cfg.paperW, paperH: cfg.paperH, plotScale: cfg.plotScale,
       });
       if (!content) return;
       _setStatus('Framing…', 'active');
@@ -319,6 +333,13 @@
       </label>
     </div>
     {/if}
+    <div class="settings-row">
+      <label title="Apply A=X+Y / B=X-Y motor transform to gcode. Leave off if your firmware (GRBL $32=1) handles CoreXY internally.">
+        <input type="checkbox" checked={$settings.gcodeCoreXY}
+               on:change={e => settings.patch({ gcodeCoreXY: e.target.checked })}>
+        CoreXY gcode
+      </label>
+    </div>
   </div>
 
   {#if $available}
@@ -339,6 +360,39 @@
       <button on:click={onPenUp}     title="Lift pen to Pen Up position">Pen Up</button>
       <button on:click={onPenDown}   title="Lower pen to Pen Down position">Pen Down</button>
       <button on:click={onServoSweep} title="Ramp M3 S0→S1000→S0 to find servo range">Sweep S</button>
+    </div>
+    <div class="pen-settings">
+      <label>
+        Mode
+        <select value={$settings.penMode}
+                on:change={e => settings.patch({ penMode: e.target.value })}>
+          <option value="z">Z axis</option>
+          <option value="servo">Servo (M3)</option>
+        </select>
+      </label>
+      {#if $settings.penMode === 'z'}
+        <label>Up Z
+          <input type="number" min="-20" max="20" step="0.5"
+                 value={$settings.penUpZ}
+                 on:change={e => settings.patch({ penUpZ: +e.target.value })}></label>
+        <label>Down Z
+          <input type="number" min="-20" max="20" step="0.5"
+                 value={$settings.penDownZ}
+                 on:change={e => settings.patch({ penDownZ: +e.target.value })}></label>
+      {:else}
+        <label>Up S
+          <input type="number" min="0" max="1000" step="5"
+                 value={$settings.penUpS}
+                 on:change={e => settings.patch({ penUpS: +e.target.value })}></label>
+        <label>Down S
+          <input type="number" min="0" max="1000" step="5"
+                 value={$settings.penDownS}
+                 on:change={e => settings.patch({ penDownS: +e.target.value })}></label>
+        <label>Y Comp
+          <input type="number" min="-10" max="10" step="0.1"
+                 value={$settings.penYComp}
+                 on:change={e => settings.patch({ penYComp: +e.target.value })}></label>
+      {/if}
     </div>
   </div>
 
@@ -487,6 +541,13 @@
     flex-wrap: wrap;
     gap: 10px;
     margin-bottom: 8px;
+  }
+
+  .pen-settings {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 8px;
   }
 
   .jog-grid {
