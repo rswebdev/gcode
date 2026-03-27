@@ -94,8 +94,8 @@
     const sx = sxR * plotScale;
     const sy = syR * plotScale;
 
-    const ndcToMmX = (nx) => Math.max(MARGIN, Math.min(MARGIN + plotW, centerX + nx * sx + offsetX));
-    const ndcToMmY = (ny) => Math.max(MARGIN, Math.min(MARGIN + plotH, centerY + ny * sy + offsetY));
+    const ndcToMmX = (nx) => centerX + nx * sx + offsetX;
+    const ndcToMmY = (ny) => centerY + ny * sy + offsetY;
 
     // Zoom transform around center
     ctx.save();
