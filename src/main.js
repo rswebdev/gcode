@@ -17,8 +17,13 @@ import * as serial     from './serial.js';
 const canvas             = document.getElementById('viz-canvas');
 const btnRecord          = document.getElementById('btn-record');
 const btnExport          = document.getElementById('btn-export');
+const btnImportGCode     = document.getElementById('btn-import-gcode');
+const fileImportGCode    = document.getElementById('file-import-gcode');
+const btnTestPattern     = document.getElementById('btn-test-pattern');
 const btnExportAnaglyph  = document.getElementById('btn-export-anaglyph');
 const btnSerialSend      = document.getElementById('btn-serial-send');
+const btnFrame           = document.getElementById('btn-frame');
+const btnCalSweep        = document.getElementById('btn-cal-sweep');
 const btnRerender        = document.getElementById('btn-rerender');
 const statusLabel        = document.getElementById('status-label');
 const frameCounter       = document.getElementById('frame-counter');
@@ -34,18 +39,25 @@ const btnPresetClear   = document.getElementById('btn-preset-clear');
 const inputMaxFrames  = document.getElementById('setting-max-frames');
 const inputAmpScale   = document.getElementById('setting-amp-scale');
 const inputFeedRate   = document.getElementById('setting-feed-rate');
+const inputOffsetX    = document.getElementById('setting-offset-x');
+const inputOffsetY    = document.getElementById('setting-offset-y');
 const inputPenUpZ     = document.getElementById('setting-pen-up-z');
 const inputPenDownZ   = document.getElementById('setting-pen-down-z');
 const inputPenMode    = document.getElementById('setting-pen-mode');
 const inputPenUpS     = document.getElementById('setting-pen-up-s');
 const inputPenDownS   = document.getElementById('setting-pen-down-s');
+const inputPenComp    = document.getElementById('setting-pen-comp');
+const inputCalYMax    = document.getElementById('setting-cal-y-max');
+const inputCalStep    = document.getElementById('setting-cal-step');
 const zUpCtrl         = document.getElementById('z-up-ctrl');
 const zDownCtrl       = document.getElementById('z-down-ctrl');
 const servoUpCtrl     = document.getElementById('servo-up-ctrl');
 const servoDownCtrl   = document.getElementById('servo-down-ctrl');
+const servoCompCtrl   = document.getElementById('servo-comp-ctrl');
 const inputFftSize    = document.getElementById('setting-fft-size');
 const inputRecordFps  = document.getElementById('setting-record-fps');
 const inputSmoothing  = document.getElementById('setting-smoothing');
+const inputImportScale = document.getElementById('import-scale');
 
 // Plotter machine controls
 const btnPlotterHome    = document.getElementById('btn-plotter-home');
@@ -114,8 +126,21 @@ let currentSource = 'noise';  // 'mic' | 'noise'
 let audioReady  = false;
 let vizReady    = false;
 let tickCount   = 0;
+let importedPathCount = 0;
 
 const RAF_FPS = 60;
+
+function _hasPlottablePaths() {
+  return recorder.getFrameCount() > 0 || importedPathCount > 0;
+}
+
+function _clearImportedPaths() {
+  importedPathCount = 0;
+}
+
+function _getActiveProjectedPaths() {
+  return visualizer.getProjectedPaths();
+}
 
 // ---------------------------------------------------------------------------
 // Per-source × per-shape defaults
@@ -188,14 +213,21 @@ function getConfig() {
   const maxFrames  = Math.max(8,   Math.min(256, parseInt(inputMaxFrames.value)  || 64));
   const ampScale   = Math.max(0.1, Math.min(10,  parseFloat(inputAmpScale.value) || 2.0));
   const feedRate   = Math.max(100, Math.min(10000, parseInt(inputFeedRate.value)  || 3000));
+  const offsetX    = parseFloat(inputOffsetX.value) || 0;
+  const offsetY    = parseFloat(inputOffsetY.value) || 0;
   const penUpZ     = Math.max(-20, Math.min(20,  parseFloat(inputPenUpZ.value)   ?? 5));
   const penDownZ   = Math.max(-20, Math.min(20,  parseFloat(inputPenDownZ.value) ?? 0));
   const penMode    = inputPenMode.value || 'z';
   const penUpS     = Math.max(0, Math.min(1000, parseInt(inputPenUpS.value)   || 80));
   const penDownS   = Math.max(0, Math.min(1000, parseInt(inputPenDownS.value) || 50));
+  const penYComp   = parseFloat(inputPenComp.value) || 0;
   const fftSize    = Math.max(32,  Math.min(2048, parseInt(inputFftSize.value)    || 512));
   const recordFps  = Math.max(1,   Math.min(30,   parseFloat(inputRecordFps.value) || 10));
-  return { maxFrames, ampScale, feedRate, penUpZ, penDownZ, penMode, penUpS, penDownS, fftSize, recordFps, amplitudeScaleMm: ampScale, coreXY: jogCoreXY.checked };
+  return { maxFrames, ampScale, feedRate, offsetX, offsetY, penUpZ, penDownZ, penMode, penUpS, penDownS, penYComp, fftSize, recordFps, amplitudeScaleMm: ampScale, coreXY: jogCoreXY.checked };
+}
+
+function getScale() {
+  return Math.max(0.1, Math.min(10, parseFloat(inputImportScale.value) || 1.0));
 }
 
 /** Read current noise-parameter inputs. */
@@ -223,6 +255,8 @@ function setAppState(state) {
     btnExport.disabled = true;
     btnExportAnaglyph.disabled = true;
     btnSerialSend.disabled = true;
+    btnFrame.disabled = true;
+    btnCalSweep.disabled = !serial.isAvailable();
     btnRerender.disabled = true;
     modeSelect.disabled = false;
     shapeSelect.disabled = false;
@@ -235,6 +269,8 @@ function setAppState(state) {
     btnExport.disabled = true;
     btnExportAnaglyph.disabled = true;
     btnSerialSend.disabled = true;
+    btnFrame.disabled = true;
+    btnCalSweep.disabled = true;
     btnRerender.disabled = true;
     modeSelect.disabled = true;
     shapeSelect.disabled = true;
@@ -245,14 +281,19 @@ function setAppState(state) {
     btnRecord.textContent = 'Record';
     btnRecord.classList.remove('recording');
     const hasFrames = recorder.getFrameCount() > 0;
-    btnExport.disabled = !hasFrames;
-    btnExportAnaglyph.disabled = !hasFrames;
-    btnSerialSend.disabled = !hasFrames || !serial.isAvailable();
+    const hasPaths  = _hasPlottablePaths();
+    btnExport.disabled = !hasPaths;
+    btnExportAnaglyph.disabled = !hasPaths;
+    btnSerialSend.disabled = !hasPaths || !serial.isAvailable();
+    btnFrame.disabled = !hasPaths || !serial.isAvailable();
+    btnCalSweep.disabled = !serial.isAvailable();
     btnRerender.disabled = !hasFrames;
     modeSelect.disabled = false;
     shapeSelect.disabled = false;
     setInputsDisabled(false);
-    statusLabel.textContent = `Captured ${recorder.getFrameCount()} frames`;
+    statusLabel.textContent = hasFrames
+      ? `Captured ${recorder.getFrameCount()} frames`
+      : `Imported ${importedPathCount} paths`;
     statusLabel.className   = 'done';
   }
 }
@@ -283,6 +324,7 @@ btnRecord.addEventListener('click', async () => {
   const cfg = getConfig();
 
   try {
+    _clearImportedPaths();
     visualizer.updateConfig(cfg);
     visualizer.clearWaveLines();
 
@@ -330,24 +372,95 @@ function _buildExportParams() {
     ampScale:   cfg.ampScale,
     fftSize:    cfg.fftSize,
     feedRate:   cfg.feedRate,
+    offsetX:    cfg.offsetX,
+    offsetY:    cfg.offsetY,
     penUpZ:     cfg.penUpZ,
     penDownZ:   cfg.penDownZ,
     penMode:    cfg.penMode,
     penUpS:     cfg.penUpS,
     penDownS:   cfg.penDownS,
+    penYComp:   cfg.penYComp,
     coreXY:     cfg.coreXY,
     camera:     visualizer.getCameraState(),
   };
 }
 
 // ---------------------------------------------------------------------------
-// Event: Export G-code button
+// Events: Import G-code / Test Pattern buttons
 // ---------------------------------------------------------------------------
+btnImportGCode.addEventListener('click', () => {
+  fileImportGCode.click();
+});
+
+fileImportGCode.addEventListener('change', async () => {
+  const file = fileImportGCode.files?.[0];
+  if (!file) return;
+
+  try {
+    const content = await file.text();
+    const { paths, stats } = gcode.parseGCodePaths(content);
+    if (paths.length === 0) {
+      statusLabel.textContent = 'No drawable G1 XY paths found';
+      statusLabel.className   = '';
+      return;
+    }
+
+    recorder.reset();
+    importedPathCount = paths.length;
+    visualizer.showImportedGCodePaths(paths, getScale());
+    const importCamPos = [0, 24, 14];
+    const importCamTgt = [0, 0, 10];
+    visualizer.setCameraState(importCamPos, importCamTgt);
+    cameraPosInput.value = importCamPos.join(' ');
+    cameraTargetInput.value = importCamTgt.join(' ');
+    setAppState('STOPPED');
+    frameCounter.textContent = `${paths.length} imported paths`;
+    statusLabel.textContent  = `Imported ${paths.length} paths (${stats.draws} draw moves)`;
+    statusLabel.className    = 'done';
+  } catch (err) {
+    statusLabel.textContent = `Import failed: ${err?.message ?? err}`;
+    statusLabel.className   = '';
+  } finally {
+    fileImportGCode.value = '';
+  }
+});
+
+btnTestPattern.addEventListener('click', () => {
+  try {
+    // Generate a 50mm × 50mm test square with 10mm grid
+    // positioned at (60, 60) to be centered-ish on A4 paper
+    const content = gcode.generateCalibrationPattern(50, 10, 60, 60);
+    const { paths, stats } = gcode.parseGCodePaths(content);
+    if (paths.length === 0) {
+      statusLabel.textContent = 'Test pattern failed to parse';
+      statusLabel.className   = '';
+      return;
+    }
+
+    recorder.reset();
+    importedPathCount = paths.length;
+    visualizer.showImportedGCodePaths(paths, getScale());
+    const importCamPos = [0, 24, 14];
+    const importCamTgt = [0, 0, 10];
+    visualizer.setCameraState(importCamPos, importCamTgt);
+    cameraPosInput.value = importCamPos.join(' ');
+    cameraTargetInput.value = importCamTgt.join(' ');
+    setAppState('STOPPED');
+    frameCounter.textContent = `${paths.length} test paths`;
+    statusLabel.textContent  = `Loaded test pattern: ${paths.length} paths (${stats.draws} draw moves)`;
+    statusLabel.className    = 'done';
+  } catch (err) {
+    statusLabel.textContent = `Test pattern failed: ${err?.message ?? err}`;
+    statusLabel.className   = '';
+  }
+});
+
 btnExport.addEventListener('click', () => {
-  if (recorder.getFrameCount() === 0) return;
+  if (!_hasPlottablePaths()) return;
 
   const params = _buildExportParams();
-  const paths  = visualizer.getProjectedPaths();
+  const paths  = _getActiveProjectedPaths();
+  if (!paths.length) return;
 
   const content = gcode.projectedPathsToGCode(paths, {
     feedRate:        params.feedRate,
@@ -357,7 +470,10 @@ btnExport.addEventListener('click', () => {
     penMode:         params.penMode,
     penUpS:          params.penUpS,
     penDownS:        params.penDownS,
+    penYComp:        params.penYComp,
     coreXY:          params.coreXY,
+    offsetX:         params.offsetX,
+    offsetY:         params.offsetY,
     aspect:          visualizer.getCameraAspect(),
     params,
   });
@@ -368,7 +484,7 @@ btnExport.addEventListener('click', () => {
 // Event: Export Anaglyph button
 // ---------------------------------------------------------------------------
 btnExportAnaglyph.addEventListener('click', () => {
-  if (recorder.getFrameCount() === 0) return;
+  if (!_hasPlottablePaths()) return;
 
   const params = _buildExportParams();
   const { leftPaths, rightPaths } = visualizer.getStereoPaths(0.65);
@@ -381,7 +497,10 @@ btnExportAnaglyph.addEventListener('click', () => {
     penMode:         params.penMode,
     penUpS:          params.penUpS,
     penDownS:        params.penDownS,
+    penYComp:        params.penYComp,
     coreXY:          params.coreXY,
+    offsetX:         params.offsetX,
+    offsetY:         params.offsetY,
     aspect:          visualizer.getCameraAspect(),
     params,
   });
@@ -397,8 +516,9 @@ btnSerialSend.addEventListener('click', async () => {
     serial.cancelSend();
     return;
   }
+  if (serial.isBusy()) return;
 
-  if (recorder.getFrameCount() === 0) return;
+  if (!_hasPlottablePaths()) return;
 
   // Connect if not already open.
   if (!serial.isConnected()) {
@@ -417,7 +537,8 @@ btnSerialSend.addEventListener('click', async () => {
 
   // Build G-code (same projection as the Export button).
   const params  = _buildExportParams();
-  const paths   = visualizer.getProjectedPaths();
+  const paths   = _getActiveProjectedPaths();
+  if (!paths.length) return;
   const content = gcode.projectedPathsToGCode(paths, {
     feedRate:        params.feedRate,
     penDownFeedRate: 300,
@@ -426,7 +547,10 @@ btnSerialSend.addEventListener('click', async () => {
     penMode:         params.penMode,
     penUpS:          params.penUpS,
     penDownS:        params.penDownS,
+    penYComp:        params.penYComp,
     coreXY:          params.coreXY,
+    offsetX:         params.offsetX,
+    offsetY:         params.offsetY,
     aspect:          visualizer.getCameraAspect(),
     params,
   });
@@ -457,12 +581,121 @@ btnSerialSend.addEventListener('click', async () => {
 });
 
 // ---------------------------------------------------------------------------
+// Event: Frame button — trace plot bounding box with pen raised
+// ---------------------------------------------------------------------------
+btnFrame.addEventListener('click', async () => {
+  if (serial.isSending()) {
+    serial.cancelSend();
+    return;
+  }
+  if (serial.isBusy()) return;
+  if (!_hasPlottablePaths()) return;
+
+  if (!serial.isConnected()) {
+    try {
+      statusLabel.textContent = 'Connecting to plotter…';
+      statusLabel.className   = 'active';
+      await serial.connect();
+    } catch (err) {
+      statusLabel.textContent = 'No port selected';
+      statusLabel.className   = '';
+      return;
+    }
+  }
+
+  const params  = _buildExportParams();
+  const paths   = _getActiveProjectedPaths();
+  const content = gcode.frameGCode(paths, {
+    penUpZ:  params.penUpZ,
+    penUpS:  params.penUpS,
+    penMode: params.penMode,
+    coreXY:  params.coreXY,
+    offsetX: params.offsetX,
+    offsetY: params.offsetY,
+    aspect:  visualizer.getCameraAspect(),
+  });
+  if (!content) return;
+
+  btnFrame.textContent = 'Stop Frame';
+  btnFrame.disabled    = false;
+  try {
+    statusLabel.className = 'active';
+    statusLabel.textContent = 'Framing…';
+    const { cancelled } = await serial.sendGCode(content);
+    statusLabel.textContent = cancelled ? 'Frame cancelled' : 'Frame complete';
+    statusLabel.className   = '';
+  } catch (err) {
+    statusLabel.textContent = `Frame error: ${err?.message ?? err}`;
+    statusLabel.className   = '';
+  } finally {
+    btnFrame.textContent = 'Frame';
+    btnFrame.disabled    = false;
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Event: Cal Sweep button — Y compensation calibration sweep
+// ---------------------------------------------------------------------------
+btnCalSweep.addEventListener('click', async () => {
+  if (serial.isSending()) {
+    serial.cancelSend();
+    return;
+  }
+  if (serial.isBusy()) return;
+
+  if (!serial.isConnected()) {
+    try {
+      statusLabel.textContent = 'Connecting to plotter…';
+      statusLabel.className   = 'active';
+      await serial.connect();
+    } catch (err) {
+      statusLabel.textContent = 'No port selected';
+      statusLabel.className   = '';
+      return;
+    }
+  }
+
+  const cfg     = getConfig();
+  const content = gcode.calSweepGCode({
+    penMode:         cfg.penMode,
+    penUpZ:          cfg.penUpZ,
+    penDownZ:        cfg.penDownZ,
+    penUpS:          cfg.penUpS,
+    penDownS:        cfg.penDownS,
+    penYComp:        cfg.penYComp,
+    feedRate:        cfg.feedRate,
+    coreXY:          cfg.coreXY,
+    calYMax:         parseFloat(inputCalYMax.value) || 260,
+    calYStep:        parseFloat(inputCalStep.value) || 20,
+  });
+
+  btnCalSweep.textContent = 'Stop Cal';
+  btnCalSweep.disabled    = false;
+  try {
+    statusLabel.className   = 'active';
+    statusLabel.textContent = 'Calibrating…';
+    const { cancelled } = await serial.sendGCode(content, (sent, total) => {
+      statusLabel.textContent = `Cal ${sent} / ${total}`;
+    });
+    statusLabel.textContent = cancelled ? 'Cal cancelled' : 'Cal complete';
+    statusLabel.className   = '';
+  } catch (err) {
+    statusLabel.textContent = `Cal error: ${err?.message ?? err}`;
+    statusLabel.className   = '';
+  } finally {
+    btnCalSweep.textContent = 'Cal';
+    btnCalSweep.disabled    = false;
+  }
+});
+
+// ---------------------------------------------------------------------------
 // Plotter machine controls (Home, Set Origin, Pen Up/Down)
 // Each button auto-connects if needed, then sends a single GRBL command.
 // ---------------------------------------------------------------------------
 
 async function _plotterCommand(cmd) {
   if (!serial.isAvailable()) return;
+  if (serial.isBusy()) return;
   if (!serial.isConnected()) {
     try {
       statusLabel.textContent = 'Connecting to plotter…';
@@ -515,6 +748,7 @@ btnServoSweep.addEventListener('click', async () => {
     serial.cancelSend();
     return;
   }
+  if (serial.isBusy()) return;
   if (!serial.isAvailable()) return;
   if (!serial.isConnected()) {
     try {
@@ -528,12 +762,12 @@ btnServoSweep.addEventListener('click', async () => {
     }
   }
 
-  // Build M3 ramp: S0 → S1000 → S0 in steps of 10, 100 ms dwell each step.
+  // Build M3 ramp: S1 → S1000 → S1 in steps of 5, 100 ms dwell each step.
 
-  const sweepStart = 0;
+  const sweepStart = 1;
   const sweepEnd   = 1000;
-  const sweepStep  = 2;
-  const sweepDwell = 0.25;
+  const sweepStep  = 5;
+  const sweepDwell = 0.1;
 
   const lines = [];
   for (let s = sweepStart; s <= sweepEnd; s += sweepStep) { lines.push(`M3 S${s}`, `G4 P${sweepDwell}`); }
@@ -563,6 +797,7 @@ function _updatePenModeVis() {
   zDownCtrl.classList.toggle('hidden', isServo);
   servoUpCtrl.classList.toggle('hidden', !isServo);
   servoDownCtrl.classList.toggle('hidden', !isServo);
+  servoCompCtrl.classList.toggle('hidden', !isServo);
 }
 
 inputPenMode.addEventListener('change', _updatePenModeVis);
@@ -609,6 +844,8 @@ btnJogZM.addEventListener('click', () => _jog('Z', -1));
 // ---------------------------------------------------------------------------
 
 const MAX_MONITOR_LINES = 500;
+const monitorCommandHistory = [];
+let monitorHistoryIndex = -1;
 
 function _appendMonitorLine(type, text) {
   const wasAtBottom =
@@ -671,6 +908,9 @@ btnMonitorClear.addEventListener('click', () => {
 async function _monitorSend() {
   const cmd = monitorInput.value.trim();
   if (!cmd) return;
+
+  monitorCommandHistory.push(cmd);
+  monitorHistoryIndex = -1;
   monitorInput.value = '';
 
   if (!serial.isAvailable()) {
@@ -695,7 +935,36 @@ async function _monitorSend() {
 }
 
 btnMonitorSend.addEventListener('click', _monitorSend);
-monitorInput.addEventListener('keydown', e => { if (e.key === 'Enter') _monitorSend(); });
+monitorInput.addEventListener('keydown', e => {
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    _monitorSend();
+    return;
+  }
+
+  if (e.key === 'ArrowUp') {
+    if (!monitorCommandHistory.length) return;
+    e.preventDefault();
+    if (monitorHistoryIndex === -1) monitorHistoryIndex = monitorCommandHistory.length - 1;
+    else monitorHistoryIndex = Math.max(0, monitorHistoryIndex - 1);
+    monitorInput.value = monitorCommandHistory[monitorHistoryIndex];
+    monitorInput.setSelectionRange(monitorInput.value.length, monitorInput.value.length);
+    return;
+  }
+
+  if (e.key === 'ArrowDown') {
+    if (!monitorCommandHistory.length || monitorHistoryIndex === -1) return;
+    e.preventDefault();
+    if (monitorHistoryIndex >= monitorCommandHistory.length - 1) {
+      monitorHistoryIndex = -1;
+      monitorInput.value = '';
+      return;
+    }
+    monitorHistoryIndex += 1;
+    monitorInput.value = monitorCommandHistory[monitorHistoryIndex];
+    monitorInput.setSelectionRange(monitorInput.value.length, monitorInput.value.length);
+  }
+});
 
 // ---------------------------------------------------------------------------
 /**
@@ -724,6 +993,7 @@ modeSelect.addEventListener('change', async () => {
   if (newMode === currentMode) return;
 
   currentMode = newMode;
+  _clearImportedPaths();
   recorder.reset();
   visualizer.clearWaveLines();
   btnExport.disabled = true;
@@ -757,6 +1027,7 @@ shapeSelect.addEventListener('change', () => {
   if (newShape === currentShape) return;
 
   currentShape = newShape;
+  _clearImportedPaths();
   _applyShapeSourceDefaults(currentSource, newShape);
   visualizer.setShape(newShape);
 
@@ -783,6 +1054,7 @@ shapeSelect.addEventListener('change', () => {
 // ---------------------------------------------------------------------------
 sourceSelect.addEventListener('change', () => {
   currentSource = sourceSelect.value;
+  _clearImportedPaths();
 
   // Show/hide noise panel
   noiseSection.classList.toggle('hidden', currentSource !== 'noise');
@@ -988,11 +1260,16 @@ function _saveSettings() {
       maxFrames:  inputMaxFrames.value,
       ampScale:   inputAmpScale.value,
       feedRate:   inputFeedRate.value,
+      offsetX:    inputOffsetX.value,
+      offsetY:    inputOffsetY.value,
       penUpZ:     inputPenUpZ.value,
       penDownZ:   inputPenDownZ.value,
       penMode:    inputPenMode.value,
       penUpS:     inputPenUpS.value,
       penDownS:   inputPenDownS.value,
+      penYComp:   inputPenComp.value,
+      calYMax:    inputCalYMax.value,
+      calYStep:   inputCalStep.value,
       fftSize:    inputFftSize.value,
       recordFps:  inputRecordFps.value,
       smoothing:  inputSmoothing.value,
@@ -1025,11 +1302,16 @@ function _loadSettings() {
   apply(inputMaxFrames,    s.maxFrames);
   apply(inputAmpScale,     s.ampScale);
   apply(inputFeedRate,     s.feedRate);
+  apply(inputOffsetX,      s.offsetX);
+  apply(inputOffsetY,      s.offsetY);
   apply(inputPenUpZ,       s.penUpZ);
   apply(inputPenDownZ,     s.penDownZ);
   apply(inputPenMode,      s.penMode);
   apply(inputPenUpS,       s.penUpS);
   apply(inputPenDownS,     s.penDownS);
+  apply(inputPenComp,      s.penYComp);
+  apply(inputCalYMax,      s.calYMax);
+  apply(inputCalStep,      s.calYStep);
   apply(inputFftSize,      s.fftSize);
   apply(inputRecordFps,    s.recordFps);
   apply(inputSmoothing,    s.smoothing);
@@ -1214,7 +1496,9 @@ window.addEventListener('DOMContentLoaded', () => {
 
   // Hide serial-dependent UI if Web Serial API is not available.
   if (!serial.isAvailable()) {
-    btnSerialSend.style.display = 'none';
+    btnSerialSend.style.display  = 'none';
+    btnFrame.style.display       = 'none';
+    btnCalSweep.style.display    = 'none';
     btnMonitorToggle.style.display = 'none';
     document.getElementById('controls-plotter').style.display = 'none';
   }

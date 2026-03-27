@@ -284,6 +284,73 @@ export function downloadGCode(content, filename) {
   setTimeout(() => URL.revokeObjectURL(url), 5000);
 }
 
+/**
+ * Parse XY draw paths from a G-code file.
+ * Draw paths are created from contiguous G1 moves; G0 moves split paths.
+ * Supports G90/G91 (absolute/relative) and G92 (set current position).
+ *
+ * @param {string} content
+ * @returns {{ paths: Array<Array<{x:number,y:number}>>, stats: { moves: number, draws: number } }}
+ */
+export function parseGCodePaths(content) {
+  const paths = [];
+  let current = null;
+  let absolute = true;
+  let x = 0;
+  let y = 0;
+  let moves = 0;
+  let draws = 0;
+
+  const finishPath = () => {
+    if (current && current.length > 1) paths.push(current);
+    current = null;
+  };
+
+  const lines = (content || '').split(/\r?\n/);
+  for (const raw of lines) {
+    if (!raw) continue;
+    const noParen = raw.replace(/\([^)]*\)/g, '');
+    const line = noParen.split(';')[0].trim();
+    if (!line) continue;
+
+    const gMatch = line.match(/\bG0*([0-9]+)\b/i);
+    const gCode = gMatch ? parseInt(gMatch[1], 10) : null;
+
+    if (gCode === 90) { absolute = true; continue; }
+    if (gCode === 91) { absolute = false; continue; }
+
+    const xMatch = line.match(/\bX\s*([-+]?\d*\.?\d+)\b/i);
+    const yMatch = line.match(/\bY\s*([-+]?\d*\.?\d+)\b/i);
+
+    if (gCode === 92) {
+      if (xMatch) x = parseFloat(xMatch[1]);
+      if (yMatch) y = parseFloat(yMatch[1]);
+      continue;
+    }
+
+    if (gCode !== 0 && gCode !== 1) continue;
+    if (!xMatch && !yMatch) continue;
+
+    const nextX = xMatch ? (absolute ? parseFloat(xMatch[1]) : x + parseFloat(xMatch[1])) : x;
+    const nextY = yMatch ? (absolute ? parseFloat(yMatch[1]) : y + parseFloat(yMatch[1])) : y;
+
+    if (gCode === 1) {
+      if (!current) current = [{ x, y }];
+      current.push({ x: nextX, y: nextY });
+      draws += 1;
+    } else {
+      finishPath();
+      moves += 1;
+    }
+
+    x = nextX;
+    y = nextY;
+  }
+
+  finishPath();
+  return { paths, stats: { moves, draws } };
+}
+
 // ---------------------------------------------------------------------------
 // Filename generation — deterministic three-word name from params hash
 // ---------------------------------------------------------------------------
@@ -406,9 +473,12 @@ export function projectedPathsToGCode(paths, config = {}) {
   const penMode     = config.penMode         ?? 'z';
   const penUpS      = config.penUpS          ?? 80;
   const penDownS    = config.penDownS        ?? 50;
+  const penYComp    = config.penYComp        ?? 0;
   const coreXY      = !!config.coreXY;
+  const offsetX     = config.offsetX ?? 0;
+  const offsetY     = config.offsetY ?? 0;
   const { sx, sy }  = _ndcScales(config.aspect ?? 1);
-  const penOpts     = { penMode, penUpZ, penDownZ, penDownFeed, penUpS, penDownS };
+  const penOpts     = { penMode, penUpZ, penDownZ, penDownFeed, penUpS, penDownS, penYComp };
 
   const lines = [];
   const ts = new Date().toISOString();
@@ -421,19 +491,18 @@ export function projectedPathsToGCode(paths, config = {}) {
   lines.push(`G21          ; Units: millimetres`);
   lines.push(`G90          ; Absolute positioning`);
   _penUp(lines, penOpts);
-  lines.push(`G0 ${_xy(MARGIN, MARGIN, coreXY)}`);
   lines.push('');
 
-  for (const path of paths) {
+  for (const path of _sortPaths(paths)) {
     if (path.length < 2) continue;
 
     // Map first point and rapid move to it (pen up).
-    const { px: x0, py: y0 } = _ndcToPaper(path[0].nx, path[0].ny, sx, sy);
+    const { px: x0, py: y0 } = _ndcToPaper(path[0].nx, path[0].ny, sx, sy, offsetX, offsetY);
     lines.push(`G0 ${_xy(x0, y0, coreXY)}`);
-    _penDown(lines, penOpts);
+    _penDown(lines, penOpts, y0);
 
     for (let i = 1; i < path.length; i++) {
-      const { px, py } = _ndcToPaper(path[i].nx, path[i].ny, sx, sy);
+      const { px, py } = _ndcToPaper(path[i].nx, path[i].ny, sx, sy, offsetX, offsetY);
       lines.push(`G1 ${_xy(px, py, coreXY)} F${feedRate}`);
     }
 
@@ -468,9 +537,12 @@ export function stereoPathsToGCode(leftPaths, rightPaths, config = {}) {
   const penMode     = config.penMode         ?? 'z';
   const penUpS      = config.penUpS          ?? 80;
   const penDownS    = config.penDownS        ?? 50;
+  const penYComp    = config.penYComp        ?? 0;
   const coreXY      = !!config.coreXY;
+  const offsetX     = config.offsetX ?? 0;
+  const offsetY     = config.offsetY ?? 0;
   const { sx, sy }  = _ndcScales(config.aspect ?? 1);
-  const penOpts     = { penMode, penUpZ, penDownZ, penDownFeed, penUpS, penDownS };
+  const penOpts     = { penMode, penUpZ, penDownZ, penDownFeed, penUpS, penDownS, penYComp };
 
   const lines = [];
   const ts = new Date().toISOString();
@@ -484,34 +556,32 @@ export function stereoPathsToGCode(leftPaths, rightPaths, config = {}) {
   lines.push(`G21          ; Units: millimetres`);
   lines.push(`G90          ; Absolute positioning`);
   _penUp(lines, penOpts);
-  lines.push(`G0 ${_xy(MARGIN, MARGIN, coreXY)}`);
   lines.push('');
   lines.push(`; ===== PASS 1: RED (left eye) =====`);
 
   function _writePaths(paths) {
     for (const path of paths) {
       if (path.length < 2) continue;
-      const { px: x0, py: y0 } = _ndcToPaper(path[0].nx, path[0].ny, sx, sy);
+      const { px: x0, py: y0 } = _ndcToPaper(path[0].nx, path[0].ny, sx, sy, offsetX, offsetY);
       lines.push(`G0 ${_xy(x0, y0, coreXY)}`);
-      _penDown(lines, penOpts);
+      _penDown(lines, penOpts, y0);
       for (let i = 1; i < path.length; i++) {
-        const { px, py } = _ndcToPaper(path[i].nx, path[i].ny, sx, sy);
+        const { px, py } = _ndcToPaper(path[i].nx, path[i].ny, sx, sy, offsetX, offsetY);
         lines.push(`G1 ${_xy(px, py, coreXY)} F${feedRate}`);
       }
       _penUp(lines, penOpts);
     }
   }
 
-  _writePaths(leftPaths);
+  _writePaths(_sortPaths(leftPaths));
 
   lines.push('');
   _penUp(lines, penOpts);
-  lines.push(`G0 ${_xy(MARGIN, MARGIN, coreXY)}`);
   lines.push(`M0           ; Pause — swap to CYAN pen`);
   lines.push('');
   lines.push(`; ===== PASS 2: CYAN (right eye) =====`);
 
-  _writePaths(rightPaths);
+  _writePaths(_sortPaths(rightPaths));
 
   lines.push('');
   _penUp(lines, penOpts);
@@ -541,9 +611,10 @@ function _ndcScales(aspect = 1) {
 
 // Map NDC (-1..+1) to paper coordinates (mm), centred on the paper.
 // sx / sy are the half-extents in mm for each axis (from _ndcScales).
-function _ndcToPaper(nx, ny, sx, sy) {
-  const px = clampX(CENTER_X + nx * sx);
-  const py = clampY(CENTER_Y + ny * sy);
+// ox / oy are optional mm offsets applied after the mapping.
+function _ndcToPaper(nx, ny, sx, sy, ox = 0, oy = 0) {
+  const px = clampX(CENTER_X + nx * sx + ox);
+  const py = clampY(CENTER_Y + ny * sy + oy);
   return { px, py };
 }
 
@@ -560,9 +631,11 @@ function _penUp(lines, opts) {
   }
 }
 
-function _penDown(lines, opts) {
+function _penDown(lines, opts, yMm = 0) {
   if (opts.penMode === 'servo') {
-    lines.push(`M3 S${opts.penDownS ?? 50}`);
+    const slope = opts.penYComp ?? 0;
+    const s = Math.round(Math.max(0, Math.min(1000, (opts.penDownS ?? 50) + slope * yMm)));
+    lines.push(`M3 S${s}`);
     lines.push(`G4 P0.1`);
   } else {
     lines.push(`G1 Z${f(opts.penDownZ)} F${opts.penDownFeed}`);
@@ -585,9 +658,96 @@ function _xy(px, py, coreXY) {
   return `X${f(px)} Y${f(py)}`;
 }
 
+/**
+ * Generate a dry-run bounding-box trace of the projected paths.
+ * The pen stays raised the entire time — use this to verify plot placement
+ * before committing to a full print.
+ *
+ * @param {Array<Array<{nx: number, ny: number}>>} paths
+ * @param {{ penUpZ?, penUpS?, penMode?, coreXY?, aspect? }} config
+ * @returns {string}
+ */
+export function frameGCode(paths, config = {}) {
+  const coreXY  = !!config.coreXY;
+  const offsetX = config.offsetX ?? 0;
+  const offsetY = config.offsetY ?? 0;
+  const penMode = config.penMode ?? 'z';
+  const penUpZ  = config.penUpZ  ?? 5;
+  const penUpS  = config.penUpS  ?? 80;
+  const penOpts = { penMode, penUpZ, penDownZ: 0, penDownFeed: 300, penUpS, penDownS: 50 };
+  const { sx, sy } = _ndcScales(config.aspect ?? 1);
+
+  // Compute bounding box across all path points.
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const path of paths) {
+    for (const pt of path) {
+      const { px, py } = _ndcToPaper(pt.nx, pt.ny, sx, sy, offsetX, offsetY);
+      if (px < minX) minX = px;
+      if (px > maxX) maxX = px;
+      if (py < minY) minY = py;
+      if (py > maxY) maxY = py;
+    }
+  }
+  if (!isFinite(minX)) return '';
+
+  const lines = ['G21', 'G90'];
+  _penUp(lines, penOpts);
+
+  // Trace: bottom-left → bottom-right → top-right → top-left → bottom-left.
+  for (const [cx, cy] of [
+    [minX, minY], [maxX, minY], [maxX, maxY], [minX, maxY], [minX, minY],
+  ]) {
+    lines.push(`G0 ${_xy(cx, cy, coreXY)}`);
+  }
+
+  _penUp(lines, penOpts);
+  lines.push('G0 X0.000 Y0.000');
+  return lines.join('\n');
+}
+
 function _rowAmpScaleMm(frameCount, configScale) {
   const rowSpacing = frameCount > 1 ? PLOT_H / (frameCount - 1) : PLOT_H;
   return rowSpacing * 0.45 * configScale;
+}
+
+/**
+ * Reorder (and if needed reverse) paths to minimise total pen-up travel using
+ * a greedy nearest-neighbour algorithm. Works in NDC space — no unit conversion
+ * needed since it's a linear transform of paper coords.
+ * Returns a new array; the input paths are not mutated.
+ */
+function _sortPaths(paths) {
+  if (paths.length < 2) return paths;
+
+  const remaining = paths.slice();
+  const result    = [];
+  let cx = 0, cy = 0;  // current head position in NDC
+
+  while (remaining.length > 0) {
+    let bestIdx  = 0;
+    let bestDist = Infinity;
+    let bestRev  = false;
+
+    for (let i = 0; i < remaining.length; i++) {
+      const p    = remaining[i];
+      const head = p[0];
+      const tail = p[p.length - 1];
+      const dHead = (head.nx - cx) ** 2 + (head.ny - cy) ** 2;
+      const dTail = (tail.nx - cx) ** 2 + (tail.ny - cy) ** 2;
+      if (dHead < bestDist) { bestDist = dHead; bestIdx = i; bestRev = false; }
+      if (dTail < bestDist) { bestDist = dTail; bestIdx = i; bestRev = true;  }
+    }
+
+    const p      = remaining.splice(bestIdx, 1)[0];
+    const chosen = bestRev ? p.slice().reverse() : p;
+    result.push(chosen);
+
+    const last = chosen[chosen.length - 1];
+    cx = last.nx;
+    cy = last.ny;
+  }
+
+  return result;
 }
 
 function _isStereo(data) {
@@ -596,4 +756,119 @@ function _isStereo(data) {
 
 function _toMono(data) {
   return _isStereo(data) ? data.left : data;
+}
+
+// ---------------------------------------------------------------------------
+// Y calibration sweep — test servo compensation across bed
+// ---------------------------------------------------------------------------
+
+/**
+ * Generate a pen calibration sweep.
+ * Draws short horizontal strokes at regular Y intervals using the current
+ * pen-down settings and Y compensation. Compare mark depth across Y positions:
+ * uniform marks → compensation correct; fading at one end → adjust penYComp.
+ *
+ * @param {{
+ *   penMode?, penUpZ?, penDownZ?, penUpS?, penDownS?, penYComp?,
+ *   feedRate?, penDownFeedRate?, coreXY?,
+ *   calYMax?: number,     // max Y to reach (mm, default 260)
+ *   calYStep?: number,    // spacing between marks (mm, default 20)
+ *   calStrokeMm?: number, // horizontal stroke length (mm, default 30)
+ *   xCenter?: number,     // X centre of strokes (mm, default paper centre)
+ * }} config
+ * @returns {string}
+ */
+export function calSweepGCode(config = {}) {
+  const penMode     = config.penMode          ?? 'z';
+  const penUpZ      = config.penUpZ           ?? 5;
+  const penDownZ    = config.penDownZ         ?? 0;
+  const penUpS      = config.penUpS           ?? 80;
+  const penDownS    = config.penDownS         ?? 50;
+  const penYComp    = config.penYComp         ?? 0;
+  const feedRate    = config.feedRate         ?? 3000;
+  const penDownFeed = config.penDownFeedRate  ?? 300;
+  const coreXY      = !!config.coreXY;
+  const yMax        = config.calYMax          ?? 260;
+  const yStep       = config.calYStep         ?? 20;
+  const stroke      = config.calStrokeMm      ?? 30;
+  const xCenter     = config.xCenter          ?? CENTER_X;
+  const xL          = xCenter - stroke / 2;
+  const xR          = xCenter + stroke / 2;
+  const penOpts     = { penMode, penUpZ, penDownZ, penDownFeed, penUpS, penDownS, penYComp };
+
+  const lines = [];
+  lines.push('; Pen Y Calibration Sweep');
+  lines.push(`; penDownS=${penDownS}  penYComp=${penYComp} S/mm`);
+  lines.push(`; ${Math.floor(yMax / yStep) + 1} marks every ${yStep} mm  (Y 0 → ${yMax} mm)`);
+  lines.push('G21');
+  lines.push('G90');
+  _penUp(lines, penOpts);
+
+  for (let y = 0; y <= yMax + 0.001; y = Math.round((y + yStep) * 1000) / 1000) {
+    lines.push(`; Y=${f(y)} mm  (mat ${(y / 10).toFixed(1)} cm)`);
+    lines.push(`G0 ${_xy(xL, y, coreXY)}`);
+    _penDown(lines, penOpts, y);
+    lines.push(`G1 ${_xy(xR, y, coreXY)} F${feedRate}`);
+    _penUp(lines, penOpts);
+  }
+
+  _penUp(lines, penOpts);
+  lines.push('G0 X0.000 Y0.000');
+  return lines.join('\n');
+}
+
+/**
+ * Generate a calibration test pattern: square outline + grid.
+ * Exports G-code text that parseGCodePaths can parse back to paths.
+ * @param {number} size - Size of square (mm, default 50)
+ * @param {number} gridSpacing - Grid line spacing (mm, default 10)
+ * @param {number} offsetX - Left offset from center (mm, default 50)
+ * @param {number} offsetY - Bottom offset (mm, default 50)
+ * @returns {string} G-code content
+ */
+export function generateCalibrationPattern(size = 50, gridSpacing = 10, offsetX = 50, offsetY = 50) {
+  const lines = [];
+  lines.push('; Calibration Test Pattern');
+  lines.push(`; ${size}mm × ${size}mm square with ${gridSpacing}mm grid`);
+  lines.push('G21');
+  lines.push('G90');
+  lines.push('G0 Z5');
+
+  const startX = offsetX;
+  const startY = offsetY;
+  const endX   = offsetX + size;
+  const endY   = offsetY + size;
+
+  // Outer square outline
+  lines.push(`; Outer square outline`);
+  lines.push(`G0 X${f(startX)} Y${f(startY)}`);
+  lines.push(`G1 X${f(endX)} Y${f(startY)} F3000`);
+  lines.push(`G1 X${f(endX)} Y${f(endY)} F3000`);
+  lines.push(`G1 X${f(startX)} Y${f(endY)} F3000`);
+  lines.push(`G1 X${f(startX)} Y${f(startY)} F3000`);
+
+  // Vertical grid lines
+  lines.push(`; Vertical grid lines`);
+  for (let x = startX + gridSpacing; x < endX; x += gridSpacing) {
+    lines.push(`G0 X${f(x)} Y${f(startY)}`);
+    lines.push(`G1 X${f(x)} Y${f(endY)} F3000`);
+  }
+
+  // Horizontal grid lines
+  lines.push(`; Horizontal grid lines`);
+  for (let y = startY + gridSpacing; y < endY; y += gridSpacing) {
+    lines.push(`G0 X${f(startX)} Y${f(y)}`);
+    lines.push(`G1 X${f(endX)} Y${f(y)} F3000`);
+  }
+
+  // Diagonal lines (for plotter movement check)
+  lines.push(`; Diagonal lines`);
+  lines.push(`G0 X${f(startX)} Y${f(startY)}`);
+  lines.push(`G1 X${f(endX)} Y${f(endY)} F3000`);
+  lines.push(`G0 X${f(endX)} Y${f(startY)}`);
+  lines.push(`G1 X${f(startX)} Y${f(endY)} F3000`);
+
+  lines.push('G0 Z5');
+  lines.push('G0 X0 Y0');
+  return lines.join('\n');
 }
