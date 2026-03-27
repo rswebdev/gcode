@@ -77,6 +77,7 @@
       linear:       { noiseType: 'perlin', noiseSpeed: 0.005, noiseFreq: 2,   noiseOct: 4, noisePers: 0.5, ampScale: 2,   maxFrames: 64  },
       terrain:      { noiseType: 'perlin', noiseSpeed: 0.005, noiseFreq: 2,   noiseOct: 4, noisePers: 0.5, ampScale: 2,   maxFrames: 64  },
       landscape:    { noiseType: 'perlin', noiseSpeed: 0.005, noiseFreq: 2,   noiseOct: 4, noisePers: 0.5, ampScale: 2,   maxFrames: 64  },
+      quantized:    { noiseType: 'perlin', noiseSpeed: 0.004, noiseFreq: 1.5, noiseOct: 3, noisePers: 0.6, ampScale: 2.5, maxFrames: 30  },
       circular:     { noiseType: 'perlin', noiseSpeed: 0.008, noiseFreq: 3,   noiseOct: 3, noisePers: 0.5, ampScale: 1.5, maxFrames: 32  },
       spiral:       { noiseType: 'perlin', noiseSpeed: 0.004, noiseFreq: 2,   noiseOct: 4, noisePers: 0.6, ampScale: 0.8, maxFrames: 96  },
       lissajous:    { noiseType: 'sine',   noiseSpeed: 0.01,  noiseFreq: 1.5, noiseOct: 3, noisePers: 0.5, ampScale: 6,   maxFrames: 32  },
@@ -93,6 +94,7 @@
       linear:       { ampScale: 1.2, maxFrames: 32,  mode: 'time'      },
       terrain:      { ampScale: 1.2, maxFrames: 32,  mode: 'time'      },
       landscape:    { ampScale: 1.2, maxFrames: 32,  mode: 'time'      },
+      quantized:    { ampScale: 1.5, maxFrames: 24,  mode: 'time'      },
       circular:     { ampScale: 1.0, maxFrames: 32,  mode: 'frequency' },
       spiral:       { ampScale: 0.5, maxFrames: 64,  mode: 'frequency' },
       lissajous:    { ampScale: 5.0, maxFrames: 16,  mode: 'stereo'    },
@@ -565,6 +567,7 @@
           <option value="chladni">Chladni (nodal lines)</option>
           <option value="moire">Moiré (offset rings)</option>
           <option value="landscape">Landscape (Joy Division)</option>
+          <option value="quantized">Quantized Noise</option>
           <option value="heatmap">Heatmap (spectrogram)</option>
         </select>
       </label>

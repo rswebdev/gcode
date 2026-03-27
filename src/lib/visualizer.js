@@ -15,6 +15,7 @@
  *   moire       — two offset concentric ring families per frame
  *   landscape   — Joy Division occlusion ridges with opaque fill polygons
  *   heatmap     — frequency spectrogram grid with cross-hatch density
+ *   quantized   — Joy Division ridges with amplitude quantized to discrete bands; gap regions colored with hatch fills
  */
 
 import * as THREE from 'three';
@@ -60,7 +61,7 @@ let scaleFactor = 1.0;     // global scale for rendering (applied to XZ plane)
 // a new frame is added. Per-frame shapes append one (or more) lines.
 // ---------------------------------------------------------------------------
 export const REBUILD_ALL_SHAPES = new Set([
-  'spiral', 'phyllotaxis', 'tube', 'flowfield', 'terrain', 'harmonograph', 'chladni', 'landscape', 'heatmap',
+  'spiral', 'phyllotaxis', 'tube', 'flowfield', 'terrain', 'harmonograph', 'chladni', 'landscape', 'heatmap', 'quantized',
 ]);
 
 // ---------------------------------------------------------------------------
@@ -283,6 +284,7 @@ export function dispose() {
 export function getProjectedPaths() {
   if (!camera || waveLines.length === 0) return [];
   if (shape === 'landscape') return _getLandscapeProjectedPaths();
+  if (shape === 'quantized') return _getQuantizedProjectedPaths();
 
   camera.updateMatrixWorld();
 
@@ -431,6 +433,7 @@ function _rebuildAll(allFrames, isLive) {
     case 'chladni':      _rebuildChladni(allFrames, isLive);      break;
     case 'landscape':    _rebuildLandscape(allFrames, isLive);    break;
     case 'heatmap':      _rebuildHeatmap(allFrames, isLive);      break;
+    case 'quantized':    _rebuildQuantized(allFrames, isLive);    break;
   }
 }
 
@@ -1143,6 +1146,174 @@ function _emitLandscapePerp(pts, isLive) {
 }
 
 /**
+ * Quantized Noise — Joy Division ridges where each wave's amplitude is snapped
+ * to discrete bands (quantized). Points below the threshold are snapped to y=0.
+ * The largest sky-gap regions between consecutive ridges are filled with colored
+ * accent hatching, both in the 3D preview (THREE.Mesh) and as exported hatch
+ * lines (THREE.Line with userData.isHatch = true).
+ */
+function _rebuildQuantized(allFrames, isLive) {
+  if (!allFrames || allFrames.length === 0) return;
+
+  const F          = allFrames.length;
+  const N          = _toMono(allFrames[0]).length;
+  const zSpacing   = SCENE_DEPTH / Math.max(cfg.maxFrames - 1, 1);
+  const FLOOR_Y    = -8;
+  const SUB        = 64;
+  const N_DIRS     = 8;
+  const N_COLORS   = 3;
+  const HATCH_STEP = 0.3;
+  const PALETTE    = ['#e8732a', '#c45fa0', '#2ab8c4'];
+  const QUANT_STEP = (4 * cfg.ampScale) / N_DIRS;
+  const dxSub      = SCENE_W / (SUB - 1);
+
+  // Pre-compute quantized Y values (full resolution + subsampled)
+  const yRaw = [];
+  const ySub = [];
+  for (let fi = 0; fi < F; fi++) {
+    const data = _toMono(allFrames[fi]);
+    const ys   = new Float32Array(N);
+    for (let i = 0; i < N; i++) {
+      const raw = data[i] * 4 * cfg.ampScale;
+      const q   = Math.round(raw / QUANT_STEP) * QUANT_STEP;
+      ys[i]     = Math.abs(raw) < QUANT_STEP ? 0 : q;
+    }
+    yRaw.push(ys);
+    const sub = new Float32Array(SUB);
+    for (let s = 0; s < SUB; s++) {
+      sub[s] = ys[Math.floor(s * (N - 1) / (SUB - 1))];
+    }
+    ySub.push(sub);
+  }
+
+  // Step 1: occluder fill polygon + quantized wave stroke per frame (back-to-front)
+  for (let fi = 0; fi < F; fi++) {
+    const ys = yRaw[fi];
+    const z  = fi * zSpacing;
+
+    const sh = new THREE.Shape();
+    sh.moveTo(-SCENE_W / 2, FLOOR_Y);
+    for (let s = 0; s < SUB; s++) {
+      const si = Math.floor(s * (N - 1) / (SUB - 1));
+      sh.lineTo((si / (N - 1)) * SCENE_W - SCENE_W / 2, ys[si]);
+    }
+    sh.lineTo(SCENE_W / 2, FLOOR_Y);
+
+    const fillGeo = new THREE.ShapeGeometry(sh);
+    const fillMat = new THREE.MeshBasicMaterial({
+      color:               0x0a0a0a,
+      polygonOffset:       true,
+      polygonOffsetFactor: 1,
+      polygonOffsetUnits:  1,
+      side:                THREE.DoubleSide,
+    });
+    const mesh = new THREE.Mesh(fillGeo, fillMat);
+    mesh.position.z = z;
+    waveLines.push(mesh);
+    scene.add(mesh);
+
+    const pos = new Float32Array(N * 3);
+    for (let i = 0; i < N; i++) {
+      pos[i * 3]     = (i / (N - 1)) * SCENE_W - SCENE_W / 2;
+      pos[i * 3 + 1] = ys[i];
+      pos[i * 3 + 2] = z;
+    }
+    const line = _makeLine(pos, fi, isLive);
+    waveLines.push(line);
+    scene.add(line);
+  }
+
+  // Step 2: compute gap areas between adjacent frame pairs, pick top-N
+  const gapAreas = [];
+  for (let fi = 0; fi < F - 1; fi++) {
+    const yB = ySub[fi];
+    const yF = ySub[fi + 1];
+    let area = 0;
+    for (let s = 0; s < SUB; s++) area += Math.max(0, yB[s] - yF[s]);
+    gapAreas.push({ fi, area: area * dxSub });
+  }
+  gapAreas.sort((a, b) => b.area - a.area);
+
+  // Step 3: colored fills + hatch lines for top-N gap regions
+  const topGaps = gapAreas.slice(0, N_COLORS);
+  for (let k = 0; k < topGaps.length; k++) {
+    const { fi } = topGaps[k];
+    if (fi + 1 >= F) continue;
+    const color = new THREE.Color(PALETTE[k]);
+    const yB    = ySub[fi];
+    const yF    = ySub[fi + 1];
+    const z     = fi * zSpacing;
+
+    const xOf = (s) => s * dxSub - SCENE_W / 2;
+
+    // Colored fill meshes (3D visual, one per contiguous gap span)
+    const emitFillSpan = (start, end) => {
+      if (end - start < 1) return;
+      const sh = new THREE.Shape();
+      sh.moveTo(xOf(start), yF[start]);
+      for (let s = start; s <= end; s++) sh.lineTo(xOf(s), yF[s]);
+      for (let s = end; s >= start; s--) sh.lineTo(xOf(s), yB[s]);
+      sh.closePath();
+      const shGeo = new THREE.ShapeGeometry(sh);
+      const shMat = new THREE.MeshBasicMaterial({
+        color,
+        transparent:         true,
+        opacity:             0.4,
+        polygonOffset:       true,
+        polygonOffsetFactor: -1,
+        polygonOffsetUnits:  -1,
+        side:                THREE.DoubleSide,
+      });
+      const m = new THREE.Mesh(shGeo, shMat);
+      m.position.z = z;
+      waveLines.push(m);
+      scene.add(m);
+    };
+
+    let inSpan = false, spanStart = 0;
+    for (let s = 0; s < SUB; s++) {
+      const hasGap = yB[s] > yF[s];
+      if (hasGap && !inSpan)  { inSpan = true; spanStart = s; }
+      else if (!hasGap && inSpan) { emitFillSpan(spanStart, s - 1); inSpan = false; }
+    }
+    if (inSpan) emitFillSpan(spanStart, SUB - 1);
+
+    // Hatch lines (exported to G-code)
+    let yMin = Infinity, yMax = -Infinity;
+    for (let s = 0; s < SUB; s++) {
+      if (yF[s] < yMin) yMin = yF[s];
+      if (yB[s] > yMax) yMax = yB[s];
+    }
+
+    const emitHatch = (x1, x2, y_h) => {
+      if (x2 <= x1) return;
+      const hPos = new Float32Array([x1, y_h, z, x2, y_h, z]);
+      const hGeo = new THREE.BufferGeometry();
+      hGeo.setAttribute('position', new THREE.BufferAttribute(hPos, 3));
+      const hMat = new THREE.LineBasicMaterial({
+        color: new THREE.Color(PALETTE[k]),
+        transparent: true,
+        opacity:     0.5,
+      });
+      const hLine = new THREE.Line(hGeo, hMat);
+      hLine.userData.isHatch = true;
+      waveLines.push(hLine);
+      scene.add(hLine);
+    };
+
+    for (let y_h = yMin; y_h <= yMax + 1e-6; y_h += HATCH_STEP) {
+      let inHatch = false, hatchX0 = 0;
+      for (let s = 0; s < SUB; s++) {
+        const inGap = y_h >= yF[s] && y_h <= yB[s];
+        if (inGap && !inHatch)  { inHatch = true; hatchX0 = xOf(s); }
+        else if (!inGap && inHatch) { emitHatch(hatchX0, xOf(s - 1), y_h); inHatch = false; }
+      }
+      if (inHatch) emitHatch(hatchX0, xOf(SUB - 1), y_h);
+    }
+  }
+}
+
+/**
  * Epicycles — DFT arm snapshot per recorded frame.
  * Each frame shows the position of K spinning arms at a fixed t value.
  */
@@ -1312,6 +1483,101 @@ function _getLandscapeProjectedPaths() {
       }
       prevPt = pt;
     }
+  }
+
+  return allPaths;
+}
+
+/**
+ * Quantized-specific projection: applies horizon masking to wave strokes
+ * (same algorithm as landscape) and naive projection to hatch lines.
+ */
+function _getQuantizedProjectedPaths() {
+  camera.updateMatrixWorld();
+  const vpMatrix = new THREE.Matrix4();
+  vpMatrix.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
+  const e = vpMatrix.elements;
+
+  const N_BUCKETS = 1024;
+  const horizon   = new Float32Array(N_BUCKETS).fill(-Infinity);
+
+  function ndcToB(nx) {
+    return Math.max(0, Math.min(N_BUCKETS - 1, Math.floor((nx + 2) / 4 * N_BUCKETS)));
+  }
+
+  function project(x, y, z) {
+    const rx = e[0]*x + e[4]*y + e[8]*z  + e[12];
+    const ry = e[1]*x + e[5]*y + e[9]*z  + e[13];
+    const rw = e[3]*x + e[7]*y + e[11]*z + e[15];
+    if (rw <= 0.001) return null;
+    return { nx: rx / rw, ny: ry / rw };
+  }
+
+  const allPaths = [];
+
+  // Wave strokes: horizon-masked, processed nearest-first
+  const waveObjs = waveLines.filter(l => l.type === 'Line' && !l.userData.isHatch);
+  for (let li = waveObjs.length - 1; li >= 0; li--) {
+    const line = waveObjs[li];
+    const attr = line.geometry.attributes.position;
+    if (!attr) continue;
+
+    const pts = [];
+    for (let i = 0; i < attr.count; i++) {
+      pts.push(project(attr.getX(i), attr.getY(i), attr.getZ(i)));
+    }
+
+    const subPaths = [];
+    let cur = null;
+
+    for (const pt of pts) {
+      if (!pt || Math.abs(pt.nx) > 2.0 || Math.abs(pt.ny) > 2.0) {
+        if (cur && cur.length > 1) subPaths.push(cur);
+        cur = null;
+        continue;
+      }
+      if (pt.ny >= horizon[ndcToB(pt.nx)]) {
+        if (!cur) cur = [];
+        cur.push({ nx: pt.nx, ny: pt.ny });
+      } else {
+        if (cur && cur.length > 1) subPaths.push(cur);
+        cur = null;
+      }
+    }
+    if (cur && cur.length > 1) subPaths.push(cur);
+    allPaths.push(...subPaths);
+
+    // Update horizon with interpolation between consecutive projected points
+    let prevPt = null;
+    for (const pt of pts) {
+      if (!pt || Math.abs(pt.nx) > 2.0 || Math.abs(pt.ny) > 2.0) { prevPt = null; continue; }
+      const b = ndcToB(pt.nx);
+      if (pt.ny > horizon[b]) horizon[b] = pt.ny;
+      if (prevPt) {
+        const b0 = ndcToB(prevPt.nx), b1 = b;
+        const bMin = Math.min(b0, b1), bMax = Math.max(b0, b1);
+        for (let bi = bMin + 1; bi < bMax; bi++) {
+          const t  = (bi - bMin) / (bMax - bMin);
+          const iy = prevPt.ny + t * (pt.ny - prevPt.ny);
+          if (iy > horizon[bi]) horizon[bi] = iy;
+        }
+      }
+      prevPt = pt;
+    }
+  }
+
+  // Hatch lines: naive projection (already clipped to gap region)
+  const hatchObjs = waveLines.filter(l => l.userData.isHatch === true);
+  for (const line of hatchObjs) {
+    const attr = line.geometry.attributes.position;
+    if (!attr || attr.count < 2) continue;
+    const path = [];
+    for (let i = 0; i < attr.count; i++) {
+      const pt = project(attr.getX(i), attr.getY(i), attr.getZ(i));
+      if (!pt) break;
+      path.push({ nx: pt.nx, ny: pt.ny });
+    }
+    if (path.length >= 2) allPaths.push(path);
   }
 
   return allPaths;
@@ -1516,6 +1782,7 @@ function _positionCameraForShape(s) {
     moire:        { pos: [0, 22,  3],  lookAt: [0, 0,  0] },
     landscape:    { pos: [0,  6, 28],  lookAt: [0, 1, 10] },
     heatmap:      { pos: [0, 22,  3],  lookAt: [0, 0,  0] },
+    quantized:    { pos: [0,  6, 28],  lookAt: [0, 1, 10] },
   };
   const { pos, lookAt } = positions[s] || positions.linear;
   camera.position.set(...pos);
