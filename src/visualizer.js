@@ -29,6 +29,12 @@ const INNER_R       = 0.5;   // polar inner radius (scene units)
 const OUTER_R       = 9.0;   // polar outer radius
 const SPIRAL_TURNS  = 3;     // full rotations for spiral shape
 const LISS_SCALE    = 7;     // scene units for lissajous extents
+const PAPER_W       = 210;
+const PAPER_H       = 297;
+const MARGIN_MM     = 10;
+const PLOT_W_MM     = PAPER_W - 2 * MARGIN_MM;
+const PLOT_H_MM     = PAPER_H - 2 * MARGIN_MM;
+const CENTER_X_MM   = MARGIN_MM + PLOT_W_MM / 2;
 
 // Golden angle for phyllotaxis
 const GOLDEN_ANGLE  = Math.PI * (3 - Math.sqrt(5));
@@ -46,6 +52,7 @@ let waveLines = [];        // recorded frame lines / segments / points
 let liveLine  = null;      // real-time preview line
 let shape     = 'linear';
 let cfg       = { ampScale: 2.0, maxFrames: 64 };
+let scaleFactor = 1.0;     // global scale for rendering (applied to XZ plane)
 
 // ---------------------------------------------------------------------------
 // Public: shape sets
@@ -101,6 +108,14 @@ export function setShape(newShape) {
 /** @param {{ ampScale?: number, maxFrames?: number }} config */
 export function updateConfig(config) {
   cfg = { ...cfg, ...config };
+}
+
+/**
+ * Set the scale factor for all rendered visualizations.
+ * @param {number} scale Scale multiplier (1.0 = normal size)
+ */
+export function setScaleFactor(scale) {
+  scaleFactor = Math.max(0.1, Math.min(10, scale || 1.0));
 }
 
 /**
@@ -209,6 +224,37 @@ export function clearWaveLines() {
   waveLines = [];
   _disposeLine(liveLine);
   liveLine = null;
+}
+
+/**
+ * Render imported G-code XY paths in the scene.
+ * @param {Array<Array<{x:number,y:number}>>} pathsMm
+ * @param {number} scale Optional scale multiplier (default 1.0)
+ */
+export function showImportedGCodePaths(pathsMm, scale) {
+  clearWaveLines();
+  if (!Array.isArray(pathsMm) || pathsMm.length === 0) return;
+
+  const scaleVal = scale !== undefined ? scale : scaleFactor;
+  let idx = 0;
+  for (const path of pathsMm) {
+    if (!Array.isArray(path) || path.length < 2) continue;
+
+    const pos = new Float32Array(path.length * 3);
+    for (let i = 0; i < path.length; i++) {
+      const xMm = path[i].x;
+      const yMm = path[i].y;
+      pos[i * 3]     = ((xMm - CENTER_X_MM) / (PLOT_W_MM / 2)) * (SCENE_W / 2) * scaleVal;
+      pos[i * 3 + 1] = 0;
+      pos[i * 3 + 2] = ((yMm - MARGIN_MM) / PLOT_H_MM) * SCENE_DEPTH * scaleVal;
+    }
+
+    const line = _makeLine(pos, idx++, false);
+    waveLines.push(line);
+    scene.add(line);
+  }
+
+  _positionCameraForShape('linear');
 }
 
 /** Call in rAF loop. */

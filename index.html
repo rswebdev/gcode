@@ -21,8 +21,13 @@
     <section id="controls-top">
       <button id="btn-record">Record</button>
       <button id="btn-export" disabled>Export G-code</button>
+      <button id="btn-import-gcode">Import G-code</button>
+      <input id="file-import-gcode" type="file" accept=".gcode,.nc,.ngc,.txt" class="hidden">
+      <button id="btn-test-pattern">Load Test Pattern</button>
       <button id="btn-export-anaglyph" disabled>Export Anaglyph</button>
       <button id="btn-serial-send" disabled>Send to Plotter</button>
+      <button id="btn-frame" disabled title="Trace the bounding box of the plot with pen raised — verify placement before printing">Frame</button>
+      <button id="btn-cal-sweep" disabled title="Draw short horizontal marks at regular Y intervals to calibrate servo Y compensation">Cal</button>
       <button id="btn-monitor-toggle">Monitor</button>
       <button id="btn-rerender" disabled>Re-render</button>
       <span id="status-label">Idle</span>
@@ -116,6 +121,14 @@
           <input id="setting-feed-rate" type="number" value="3000" min="100" max="10000" step="100">
         </label>
         <label>
+          X Offset (mm)
+          <input id="setting-offset-x" type="number" value="0" min="-200" max="200" step="1">
+        </label>
+        <label>
+          Y Offset (mm)
+          <input id="setting-offset-y" type="number" value="0" min="-200" max="200" step="1">
+        </label>
+        <label>
           Pen Mode
           <select id="setting-pen-mode">
             <option value="z" selected>Z axis</option>
@@ -138,6 +151,18 @@
           Servo Down S
           <input id="setting-pen-down-s" type="number" value="50" min="0" max="1000" step="5">
         </label>
+        <label id="servo-comp-ctrl" class="hidden">
+          Servo Y Comp (S/mm)
+          <input id="setting-pen-comp" type="number" value="0" min="-10" max="10" step="0.1">
+        </label>
+        <label>
+          Cal Y Max (mm)
+          <input id="setting-cal-y-max" type="number" value="260" min="10" max="500" step="10">
+        </label>
+        <label>
+          Cal Step (mm)
+          <input id="setting-cal-step" type="number" value="20" min="5" max="100" step="5">
+        </label>
         <label>
           FFT Size
           <input id="setting-fft-size" type="number" value="512" min="32" max="2048" step="32">
@@ -149,6 +174,13 @@
         <label class="mic-only-ctrl">
           Smoothing
           <input id="setting-smoothing" type="number" value="0.5" min="0" max="0.95" step="0.05">
+        </label>
+      </section>
+
+      <section id="controls-scale">
+        <label>
+          Plot Scale
+          <input id="import-scale" type="number" value="1.0" min="0.1" max="10" step="0.1">
         </label>
       </section>
 
@@ -281,11 +313,14 @@
         <tr><td>Max Frames</td><td>Frame count at which recording auto-stops (8–256).</td></tr>
         <tr><td>Amp Scale</td><td>Vertical exaggeration of the waveform amplitude.</td></tr>
         <tr><td>Speed (mm/min)</td><td>Plotter feed rate — affects G-code only, not the preview.</td></tr>
+        <tr><td>X Offset (mm)</td><td>Shift the entire plot this many mm along the X axis. Use to reposition on the paper without re-zeroing the machine.</td></tr>
+        <tr><td>Y Offset (mm)</td><td>Shift the entire plot this many mm along the Y axis.</td></tr>
         <tr><td>Pen Mode</td><td><strong>Z axis</strong> — uses G0/G1 Z moves to lift/lower the pen (stepper motor). <strong>Servo (M3)</strong> — uses M3 S{value} to drive a servo connected to the spindle PWM output. Use Servo mode if your Z doesn't respond to Z commands.</td></tr>
         <tr><td>Pen Up Z</td><td>(Z axis mode) Z height (mm) when the pen is lifted. Try 5; use negative values if your Z-axis is inverted.</td></tr>
         <tr><td>Pen Down Z</td><td>(Z axis mode) Z height (mm) when the pen touches paper. Try 0 or a small negative value.</td></tr>
         <tr><td>Servo Up S</td><td>(Servo mode) S value for pen lifted. With $30=1000 and 50 Hz GRBL the MG90S safe range is S50–S100 (5%–10% duty = 1–2 ms pulse). Default 80 ≈ 1.6 ms. Adjust until the servo fully lifts the pen. If the servo moves the wrong way, swap Up and Down values.</td></tr>
         <tr><td>Servo Down S</td><td>(Servo mode) S value for pen on paper. Default 50 ≈ 1 ms (minimum MG90S pulse). Values below S50 (with $30=1000) are below the servo's minimum and may not move it. Adjust down from 50 until the pen just touches the paper.</td></tr>
+        <tr><td>Servo Y Comp (S/mm)</td><td>(Servo mode) Compensates for mechanical arm droop: adds this many S-units per mm of Y travel at each pen-down. If the pen presses harder at large Y values, set a positive value (pen lifts slightly at higher Y). Calibrate by finding the correct Down S at Y=0 and at Y=max, then divide the S difference by the Y distance in mm.</td></tr>
         <tr><td>FFT Size</td><td>Audio analysis window size. Higher = more frequency detail.</td></tr>
         <tr><td>Record FPS</td><td>Frames captured per second (1–30). Lower = slower temporal evolution in the plot.</td></tr>
         <tr><td>Smoothing</td><td>Mic frequency-mode averaging (0 = raw, 0.95 = very smooth). Hidden when using Noise source.</td></tr>
@@ -295,11 +330,15 @@
       <p>Requires Chrome or Edge over HTTPS / localhost. Connects directly to GRBL over USB Serial (115200 baud).</p>
       <table>
         <tr><td>Send to Plotter</td><td>Opens the port picker (first time), then streams G-code line-by-line with GRBL acknowledgement. Click again to cancel mid-job.</td></tr>
+        <tr><td>Frame</td><td>Traces the bounding box of the current plot with the pen raised — no marks on the paper. Use this to verify that the plot is positioned and scaled correctly before printing. Click again to stop early.</td></tr>
         <tr><td>Home</td><td>Runs the GRBL homing cycle (<code>$H</code>). Requires limit switches.</td></tr>
         <tr><td>Zero X,Y</td><td>Zeros X and Y work coordinates at the current head position (<code>G92 X0 Y0</code>). Jog the head to your plot origin corner, then click this.</td></tr>
         <tr><td>Zero Z</td><td>Zeros Z at the current height (<code>G92 Z0</code>). Jog Z down until the pen just touches the paper, then click this. Pen Down Z should then be 0 and Pen Up Z your lift amount.</td></tr>
         <tr><td>Pen Up / Pen Down</td><td>Move Z to the configured Pen Up / Pen Down Z values. Use to verify the lift height before plotting.</td></tr>
         <tr><td>Sweep S</td><td>Ramps M3 S0 → S1000 → S0 in 50-step increments (300 ms per step) so you can watch the servo travel across its full range and identify the right Up/Down S values. Connects to the plotter automatically. Click again to stop mid-sweep.</td></tr>
+        <tr><td>Cal</td><td>Draws short horizontal test marks at regular Y intervals (every Cal Step mm) from Y=0 up to Cal Y Max. Each mark uses the current Servo Down S adjusted by the Y compensation at that row. Place a cutting mat or paper on the bed and compare mark depth across Y positions — uniform marks = good compensation; fading/heavier at one end = adjust Servo Y Comp. Click again to stop early.</td></tr>
+        <tr><td>Cal Y Max (mm)</td><td>Highest Y position reached by the calibration sweep. Set to your bed/mat height minus a small margin (e.g. 260 for a 270 mm mat).</td></tr>
+        <tr><td>Cal Step (mm)</td><td>Spacing between calibration test marks. 20 mm gives 14 marks on a 270 mm mat, matching every-2-cm grid lines on a standard cutting mat.</td></tr>
         <tr><td>Jog</td><td>Move the head in X, Y, or Z by the selected step size. Use to position before zeroing. Step sizes: 0.1 mm (fine), 1 mm, 10 mm.</td></tr>
       </table>
 

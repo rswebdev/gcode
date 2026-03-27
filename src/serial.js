@@ -20,8 +20,9 @@ let _port    = null;
 let _reader  = null;
 let _writer  = null;
 let _rxBuf   = '';
-let _sending = false;
-let _cancelReq = false;
+let _sending    = false;  // true while sendGCode() is running
+let _cmdPending = false;  // true while sendCommand() is awaiting its ok
+let _cancelReq  = false;
 
 // ---------------------------------------------------------------------------
 // Monitor event bus
@@ -50,8 +51,11 @@ export function isAvailable() { return 'serial' in navigator; }
 /** True if a port is currently open. */
 export function isConnected() { return _port !== null; }
 
-/** True while sendGCode() is running. */
+/** True while sendGCode() is running (and can be cancelled). */
 export function isSending()   { return _sending; }
+
+/** True while any send or command is in flight (sendGCode or sendCommand). */
+export function isBusy()      { return _sending || _cmdPending; }
 
 // ---------------------------------------------------------------------------
 // Connect / disconnect
@@ -82,6 +86,7 @@ export async function disconnect() {
   try { if (_writer) _writer.releaseLock();  } catch (_) {}
   try { if (_port)   await _port.close();    } catch (_) {}
   _port = null; _reader = null; _writer = null; _rxBuf = '';
+  _sending = false; _cmdPending = false;
   _emit('info', 'Disconnected');
 }
 
@@ -103,11 +108,10 @@ async function _write(text) {
  * @param {number} timeoutMs
  * @throws if an error/alarm response is received, the port closes, or timeout.
  */
-async function _readUntilOk(timeoutMs = 30_000) {
+async function _readUntilOk(timeoutMs = 10_000) {
   const deadline = Date.now() + timeoutMs;
-  while (true) {
-    if (Date.now() > deadline) throw new Error('Timeout waiting for GRBL response');
 
+  while (true) {
     const nl = _rxBuf.indexOf('\n');
     if (nl >= 0) {
       const line = _rxBuf.slice(0, nl).trim();
@@ -120,9 +124,20 @@ async function _readUntilOk(timeoutMs = 30_000) {
       continue;
     }
 
-    const { value, done } = await _reader.read();
-    if (done) throw new Error('Serial port closed during receive');
-    _rxBuf += new TextDecoder().decode(value);
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) throw new Error('Timeout waiting for GRBL response');
+
+    // Race the reader against the wall-clock deadline so _cmdPending/_sending
+    // are always released even if GRBL stops responding.
+    const result = await Promise.race([
+      _reader.read(),
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('Timeout waiting for GRBL response')), remaining)
+      ),
+    ]);
+
+    if (result.done) throw new Error('Serial port closed during receive');
+    _rxBuf += new TextDecoder().decode(result.value);
   }
 }
 
@@ -143,6 +158,7 @@ async function _readUntilOk(timeoutMs = 30_000) {
 export async function sendGCode(gcodeString, onProgress) {
   if (!isConnected()) throw new Error('Not connected to plotter');
   if (_sending)       throw new Error('Already sending');
+  if (_cmdPending)    throw new Error('Port is busy');
 
   _sending   = true;
   _cancelReq = false;
@@ -188,7 +204,12 @@ export function cancelSend() {
  */
 export async function sendCommand(cmd) {
   if (!isConnected()) throw new Error('Not connected to plotter');
-  if (_sending)       throw new Error('Cannot send command while job is running');
-  await _write(cmd + '\n');
-  await _readUntilOk(10_000);
+  if (_sending || _cmdPending) throw new Error('Port is busy');
+  _cmdPending = true;
+  try {
+    await _write(cmd + '\n');
+    await _readUntilOk(10_000);
+  } finally {
+    _cmdPending = false;
+  }
 }
