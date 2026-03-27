@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-03-27
+
+### Bug Fixes
+- **Joy Division circles in export**: `THREE.LineSegments` (decorative amplitude circles) were passing through the landscape path filter and appearing as plotter paths; now only `THREE.Line` wave strokes are projected.
+- **Joy Division coordinate clamping**: Projected paths were clamped to paper margins, turning out-of-bounds wave segments into flat lines at the paper edge. Clamping is now opt-in (`frameGCode` only) so landscape paths extend freely beyond the plot area.
+
+### Features
+- **Playback animation**: New Play/Pause/Reset controls in the G-code viewer animate through all paths, showing pen-down draws in cyan and pen-up travels as dashed grey lines with a red dot at the current pen position. A speed slider and live move/lift counter are included.
+- **Show/hide tool path**: Checkbox in G-code Settings to toggle the tool path overlay on the preview canvas.
+
 ## [1.1.0] - 2026-03-27
 
 ### Added
