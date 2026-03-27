@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-03-27
+
+### Features
+- **Quantized Noise shape**: New visualization where wave amplitudes are snapped to 8 discrete bands, producing stepped staircase ridge profiles. Points below the minimum threshold snap to y=0. The three largest sky-gap regions between adjacent ridges are detected and highlighted with colored accent fills (amber, rose, teal) in the 3D preview and exported as horizontal hatch lines in G-code.
+
 ## [1.2.0] - 2026-03-27
 
 ### Bug Fixes
