@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.1] - 2026-03-28
+
+### Tooling
+- **ESLint + svelte-check**: Added `npm run lint` (ESLint with `eslint-plugin-svelte`) and `npm run check` (svelte-check) quality scripts; fixed 10 pre-existing lint errors (empty catch blocks, missing `{#each}` keys, false-positive reactive loop).
+- **Playwright smoke tests**: New `tests/smoke.test.js` with 11 browser smoke tests covering page load, tab switching, help modal, shape selector completeness (all 15 shapes), and source selector.
+- **GPLv3 license**: Added `LICENSE` file.
+- **README overhaul**: Updated quick start to `npm install && npm run dev`, expanded shapes table to 15, updated file structure to reflect Svelte 5 layout, documented Playback and Quantized Noise features.
+
 ## [1.3.0] - 2026-03-27
 
 ### Features
