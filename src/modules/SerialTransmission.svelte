@@ -236,6 +236,7 @@
   $: if ($log && monitorLog) {
     const atBottom =
       monitorLog.scrollHeight - monitorLog.scrollTop <= monitorLog.clientHeight + 4;
+    // eslint-disable-next-line svelte/infinite-reactive-loop
     if (atBottom) setTimeout(() => { if (monitorLog) monitorLog.scrollTop = monitorLog.scrollHeight; }, 0);
   }
 
@@ -448,7 +449,7 @@
     </div>
     {#if monitorOpen}
     <div class="monitor-log" bind:this={monitorLog}>
-      {#each $log as entry}
+      {#each $log as entry, i (i)}
         <div class="log-line log-{entry.type}" class:log-ok={entry.type==='rx' && entry.text==='ok'} class:log-err={entry.type==='rx' && (entry.text.startsWith('error') || entry.text.startsWith('ALARM'))}>
           {entry.type === 'tx' ? '> ' : entry.type === 'rx' ? '< ' : '  '}{entry.text}
         </div>
