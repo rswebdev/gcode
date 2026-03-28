@@ -526,7 +526,7 @@
         Size
         <select value={$settings.paperSize}
                 on:change={e => settings.patch({ paperSize: e.target.value })}>
-          {#each Object.entries(PAPER_SIZES) as [key, p]}
+          {#each Object.entries(PAPER_SIZES) as [key, p] (key)}
             <option value={key}>{p.label}</option>
           {/each}
         </select>
