@@ -18,6 +18,7 @@
   let threshold  = 128;   // 1–254
   let invert     = false;
   let simplify   = 1.5;   // RDP tolerance (doubled-pixel units)
+  let smooth     = 4;     // Catmull-Rom subdivisions per segment (0/1 = off)
   let minPoints  = 3;     // drop paths shorter than this after simplification
 
   // ── UI state ──────────────────────────────────────────────────────────────
@@ -25,7 +26,7 @@
   let isTracing  = false;
 
   // ── Reactive re-trace when settings change ────────────────────────────────
-  $: if (imageData) retrace(threshold, invert, simplify, minPoints);
+  $: if (imageData) retrace(threshold, invert, simplify, smooth, minPoints);
 
   // ── Image loading ─────────────────────────────────────────────────────────
 
@@ -58,7 +59,7 @@
       URL.revokeObjectURL(url);
 
       await tick(); // wait for canvas element to mount
-      retrace(threshold, invert, simplify, minPoints);
+      retrace(threshold, invert, simplify, smooth, minPoints);
     };
     image.onerror = () => {
       statusText = 'Failed to load image';
@@ -69,7 +70,7 @@
 
   // ── Tracing ───────────────────────────────────────────────────────────────
 
-  function retrace(_t, _i, _s, _m) {
+  function retrace(_t, _i, _s, _sm, _m) {
     if (!imageData) return;
     isTracing = true;
     statusText = 'Tracing…';
@@ -77,7 +78,7 @@
     // Defer to next task so the UI can show the "Tracing…" state first.
     setTimeout(() => {
       tracedPaths = traceImage(imageData, {
-        threshold, invert, simplify, minPoints,
+        threshold, invert, simplify, smooth, minPoints,
       });
       statusText = tracedPaths.length
         ? `${tracedPaths.length} path${tracedPaths.length !== 1 ? 's' : ''} traced`
@@ -221,7 +222,7 @@
         </section>
 
         <section>
-          <h3>Simplify</h3>
+          <h3>Simplify &amp; Smooth</h3>
 
           <label>
             Tolerance
@@ -229,6 +230,13 @@
           </label>
           <input type="range" min="0" max="10" step="0.5"
                  bind:value={simplify} class="full-range">
+
+          <label>
+            Smoothing
+            <span class="value-badge">{smooth === 0 || smooth === 1 ? 'off' : smooth}</span>
+          </label>
+          <input type="range" min="0" max="8" step="1"
+                 bind:value={smooth} class="full-range">
 
           <label>
             Min. points
