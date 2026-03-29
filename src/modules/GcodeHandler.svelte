@@ -24,7 +24,7 @@
   let playSeq      = [];   // built lazily from activePaths
   let playIdx      = 0;    // segments revealed so far
   let playing      = false;
-  let playSpeed    = 5;    // 1–50; moves per frame = playSpeed * 50
+  let playSpeed    = 5;    // 1–10; moves per frame = 2^(speed-1) (1, 2, 4 … 512)
   let playRaf      = null;
   let playOptimized = false; // use sorted (optimized) path order in preview
   let playTravelPct = null;  // % travel reduction from optimizing (null = not computed yet)
@@ -92,7 +92,7 @@
   function schedulePlayFrame() {
     playRaf = requestAnimationFrame(() => {
       if (!playing) return;
-      const step = playSpeed * 50;
+      const step = Math.pow(2, playSpeed - 1);
       playIdx = Math.min(playIdx + step, playSeq.length);
       redraw();
       if (playIdx < playSeq.length) schedulePlayFrame();
@@ -244,6 +244,28 @@
     if (playSeq.length > 0 && playIdx > 0) {
       // Play mode: render accumulated trace up to playIdx
       const stop = Math.min(playIdx, playSeq.length);
+
+      // Shading passes — static orange background (all passes, not animated)
+      const shadeColors = ['#cc550044', '#e0770055', '#f0a02066', '#f8cc6077'];
+      const shading = get(shadingPasses);
+      if (shading?.length) {
+        ctx.lineWidth = 0.6;
+        ctx.lineJoin  = 'round';
+        ctx.lineCap   = 'round';
+        for (let si = 0; si < shading.length; si++) {
+          ctx.strokeStyle = shadeColors[si] ?? shadeColors[shadeColors.length - 1];
+          for (const path of shading[si].paths) {
+            if (path.length < 2) continue;
+            ctx.beginPath();
+            for (let i = 0; i < path.length; i++) {
+              const { nx, ny } = path[i];
+              if (i === 0) ctx.moveTo(toCanX(ndcToMmX(nx)), toCanY(ndcToMmY(ny)));
+              else         ctx.lineTo(toCanX(ndcToMmX(nx)), toCanY(ndcToMmY(ny)));
+            }
+            ctx.stroke();
+          }
+        }
+      }
 
       // Pen-up travels — dashed gray
       ctx.strokeStyle = 'rgba(120,120,120,0.45)';
@@ -584,7 +606,7 @@
       </div>
       <label style="margin-top:6px">
         Speed
-        <input type="range" min="1" max="50" step="1" bind:value={playSpeed}>
+        <input type="range" min="1" max="10" step="1" bind:value={playSpeed}>
       </label>
       <label class="checkbox-label" style="margin-top:4px">
         <input type="checkbox" bind:checked={playOptimized}>

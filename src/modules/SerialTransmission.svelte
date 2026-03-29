@@ -172,24 +172,50 @@
   }
 
   // ---------------------------------------------------------------------------
-  // Servo Sweep
+  // Servo Sweep — REMOVED per user request
   // ---------------------------------------------------------------------------
-  async function onServoSweep() {
-    if (serial.isSending()) { serial.cancelSend(); return; }
+
+  // ---------------------------------------------------------------------------
+  // Connection helpers
+  // ---------------------------------------------------------------------------
+  async function onReconnect() {
+    if (serial.isConnected() || !$available) return;
+    try {
+      _setStatus('Reconnecting…', 'active');
+      await serial.reconnect();
+      connected.set(true);
+      _setStatus('Reconnected', 'done');
+    } catch (err) {
+      _setStatus(`Reconnect failed: ${err?.message ?? err}`);
+    }
+  }
+
+  async function onUnlock() { _cmd('$X'); }
+
+  async function onCycleStart() {
+    if (!$available || !$connected) return;
+    try {
+      serial.sendCycleStart();
+      _setStatus('Resumed', 'done');
+    } catch (err) {
+      _setStatus(`Resume error: ${err?.message ?? err}`);
+    }
+  }
+
+  async function onPenUpHome() {
     if (serial.isBusy() || !$available) return;
+    const s = get(settings);
+    const penUpCmd = s.penMode === 'servo'
+      ? `M3 S${+s.penUpS || 80}`
+      : `G0 Z${(+s.penUpZ ?? 5).toFixed(3)}`;
     try {
       await _ensureConnected();
-      const lines = [];
-      for (let s = 1;    s <= 1000; s += 5) { lines.push(`M3 S${s}`, 'G4 P0.1'); }
-      for (let s = 1000; s >= 1;    s -= 5) { lines.push(`M3 S${s}`, 'G4 P0.1'); }
-      lines.push('M5');
-      _setStatus('Sweeping…', 'active');
-      const { cancelled } = await serial.sendGCode(lines.join('\n'), (sent, total) => {
-        _setStatus(`Sweep ${sent} / ${total}`, 'active');
+      await serial.sendGCode(`${penUpCmd}\nG0 X0.000 Y0.000\n`, (sent, total) => {
+        _setStatus(`Homing ${sent}/${total}`, 'active');
       });
-      _setStatus(cancelled ? 'Sweep cancelled' : 'Sweep complete');
+      _setStatus('Pen up + at home', 'done');
     } catch (err) {
-      _setStatus(`Sweep error: ${err?.message ?? err}`);
+      _setStatus(`Error: ${err?.message ?? err}`);
     }
   }
 
@@ -296,6 +322,9 @@
       <span class="conn-dot" class:connected={$connected}></span>
       {$connected ? 'Connected' : 'Not connected'}
     </span>
+    {#if !$connected && $available}
+      <button class="btn-inline" on:click={onReconnect} title="Reconnect to last used port without showing port picker">Reconnect</button>
+    {/if}
     {#if statusText}
       <span class="status-text {statusClass}">{statusText}</span>
     {/if}
@@ -352,6 +381,9 @@
       <button on:click={onHome}   title="Run GRBL homing cycle ($H)">Home</button>
       <button on:click={onZeroXY} title="Zero X, Y at current position">Zero X,Y</button>
       <button on:click={onZeroZ}  title="Zero Z at current position">Zero Z</button>
+      <button on:click={onUnlock} title="Send $X to clear GRBL alarm lock">Unlock ($X)</button>
+      <button on:click={onPenUpHome} title="Lift pen then travel to X0 Y0">Pen Up + Home</button>
+      <button on:click={onCycleStart} disabled={!$connected} title="Resume after M0 pause (pen-swap)">Continue (~)</button>
     </div>
   </div>
 
@@ -359,9 +391,8 @@
   <div class="panel">
     <h3>Pen</h3>
     <div class="btn-row">
-      <button on:click={onPenUp}     title="Lift pen to Pen Up position">Pen Up</button>
-      <button on:click={onPenDown}   title="Lower pen to Pen Down position">Pen Down</button>
-      <button on:click={onServoSweep} title="Ramp M3 S0→S1000→S0 to find servo range">Sweep S</button>
+      <button on:click={onPenUp}   title="Lift pen to Pen Up position">Pen Up</button>
+      <button on:click={onPenDown} title="Lower pen to Pen Down position">Pen Down</button>
     </div>
     <div class="pen-settings">
       <label>
@@ -504,6 +535,17 @@
   .status-text.done   { color: #44bb44; }
 
   .warn { color: #cc6600; font-size: 11px; }
+
+  .btn-inline {
+    padding: 2px 8px;
+    font-size: 11px;
+    background: #1a1a1a;
+    border: 1px solid #333;
+    border-radius: 4px;
+    color: #aaa;
+    cursor: pointer;
+  }
+  .btn-inline:hover { background: #252525; color: #ddd; }
 
   .panel {
     background: #0d0d0d;
