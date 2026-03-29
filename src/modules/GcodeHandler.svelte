@@ -107,14 +107,14 @@
     }
     passes.push({ label: 'Contours', color: '#00d4ff', segs: _pathsToPassSegs(contourPaths, toMmX, toMmY) });
 
-    // Shade passes
+    // Shade passes — always sorted to match imageGCode() output
     const shading = get(shadingPasses);
     if (shading?.length) {
       for (let i = 0; i < shading.length; i++) {
         passes.push({
           label: shading[i].label,
           color: shadePassColors[i] ?? shadePassColors.at(-1),
-          segs: _pathsToPassSegs(shading[i].paths, toMmX, toMmY),
+          segs: _pathsToPassSegs(gcode.sortPaths(shading[i].paths), toMmX, toMmY),
         });
       }
     }
