@@ -28,6 +28,11 @@
   // ── UI state ──────────────────────────────────────────────────────────────
   let statusText = 'Choose an image to begin';
   let isTracing  = false;
+  let zoomLevel  = 1;
+  let panX       = 0;
+  let panY       = 0;
+  let _isDragging = false;
+  let _dragLast   = { x: 0, y: 0 };
 
   // ── Reactive re-trace when settings change ────────────────────────────────
   $: if (imageData) retrace(threshold, invert, simplify, smooth, minPoints, fill, fillSpacing, shadeLevels);
@@ -119,6 +124,12 @@
     ctx.fillStyle = '#111';
     ctx.fillRect(0, 0, W, H);
 
+    // Apply zoom + pan transform
+    ctx.save();
+    ctx.translate(W / 2 + panX, H / 2 + panY);
+    ctx.scale(zoomLevel, zoomLevel);
+    ctx.translate(-W / 2, -H / 2);
+
     // Letterbox the source image
     const imgA = imageData.width / imageData.height;
     let imgW, imgH;
@@ -162,7 +173,38 @@
 
     // Contours on top
     drawPaths(contourPaths, '#00d4ff');
+
+    ctx.restore();
   }
+
+  function onPreviewWheel(e) {
+    e.preventDefault();
+    const rect = previewCanvas.getBoundingClientRect();
+    const mx = e.clientX - rect.left;
+    const my = e.clientY - rect.top;
+    const W  = rect.width, H = rect.height;
+    const factor  = e.deltaY > 0 ? 0.9 : 1.1;
+    const newZoom = Math.max(0.25, Math.min(16, zoomLevel * factor));
+    panX = panX + (mx - W / 2 - panX) * (1 - newZoom / zoomLevel);
+    panY = panY + (my - H / 2 - panY) * (1 - newZoom / zoomLevel);
+    zoomLevel = newZoom;
+    drawPreview();
+  }
+
+  function onPreviewMouseDown(e) {
+    if (e.button !== 0) return;
+    _isDragging = true;
+    _dragLast = { x: e.offsetX, y: e.offsetY };
+  }
+  function onPreviewMouseMove(e) {
+    if (!_isDragging) return;
+    panX += e.offsetX - _dragLast.x;
+    panY += e.offsetY - _dragLast.y;
+    _dragLast = { x: e.offsetX, y: e.offsetY };
+    drawPreview();
+  }
+  function onPreviewMouseUp() { _isDragging = false; }
+  function resetPreviewZoom() { zoomLevel = 1; panX = 0; panY = 0; drawPreview(); }
 
   onMount(() => drawPreview());
 
@@ -211,7 +253,16 @@
             <span class="drop-hint">PNG · JPG · WebP · GIF</span>
           </label>
         {:else}
-          <canvas bind:this={previewCanvas} class="trace-canvas"></canvas>
+          <div class="canvas-wrap">
+            <canvas bind:this={previewCanvas} class="trace-canvas"
+                    class:dragging={_isDragging}
+                    on:wheel|nonpassive|preventDefault={onPreviewWheel}
+                    on:mousedown={onPreviewMouseDown}
+                    on:mousemove={onPreviewMouseMove}
+                    on:mouseup={onPreviewMouseUp}
+                    on:mouseleave={onPreviewMouseUp}></canvas>
+            <button class="zoom-reset" on:click={resetPreviewZoom} title="Reset zoom">⊡</button>
+          </div>
         {/if}
         <input id="img-file-input" type="file" accept="image/*"
                class="file-input" bind:this={fileInput} on:change={onFileChange}>
@@ -425,7 +476,34 @@
     width: 100%;
     height: 100%;
     display: block;
+    cursor: grab;
   }
+  .trace-canvas.dragging { cursor: grabbing; }
+
+  .canvas-wrap {
+    position: absolute;
+    inset: 0;
+  }
+
+  .zoom-reset {
+    position: absolute;
+    bottom: 8px;
+    right: 8px;
+    background: #1a1a1a;
+    border: 1px solid #333;
+    color: #666;
+    font-size: 14px;
+    width: 26px;
+    height: 26px;
+    border-radius: 4px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    line-height: 1;
+  }
+  .zoom-reset:hover { color: #aaa; background: #222; }
 
   .file-input { display: none; }
 
