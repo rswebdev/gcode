@@ -544,16 +544,9 @@
       <label>
         Shape
         <select value={$settings.shape} on:change={onShapeChange} disabled={isRecording}>
-          <option value="linear">Linear (stacked)</option>
-          <option value="circular">Circular (concentric)</option>
-          <option value="spiral">Spiral</option>
-          <option value="lissajous">Lissajous (L×R)</option>
-          <option value="terrain">Terrain (horizon mask)</option>
-          <option value="harmonograph">Harmonograph (pendulum)</option>
-          <option value="moire">Moiré (offset rings)</option>
-          <option value="landscape">Landscape (Joy Division)</option>
-          <option value="quantized">Quantized Noise</option>
-          <option value="heatmap">Heatmap (spectrogram)</option>
+          {#each visualizer.getPlugins() as plug (plug.id)}
+            <option value={plug.id}>{plug.label}</option>
+          {/each}
         </select>
       </label>
 

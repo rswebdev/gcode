@@ -43,13 +43,71 @@ let cfg       = { ampScale: 2.0, maxFrames: 64 };
 let scaleFactor = 1.0;     // global scale for rendering (applied to XZ plane)
 
 // ---------------------------------------------------------------------------
-// Public: shape sets
-// REBUILD_ALL_SHAPES reconstruct their full geometry from all frames each time
-// a new frame is added. Per-frame shapes append one (or more) lines.
+// Plugin registry
 // ---------------------------------------------------------------------------
-export const REBUILD_ALL_SHAPES = new Set([
-  'spiral', 'terrain', 'harmonograph', 'landscape', 'heatmap', 'quantized',
-]);
+
+/**
+ * Plugin contract:
+ * {
+ *   id:             string   — unique shape identifier
+ *   label:          string   — display name shown in the UI
+ *   rebuildAll?:    boolean  — true  → rebuild geometry from all frames each tick
+ *                             false → append one geometry per new frame (default)
+ *   cameraPosition: { pos: [x,y,z], lookAt: [x,y,z] }
+ *
+ *   // Per-frame additive shapes (rebuildAll = false):
+ *   buildPerFrame?(frameData, frameIndex, isLive, ctx) → THREE.Object3D[]
+ *   buildLiveLine?(frameData, allFrames, frameCount, ctx) → THREE.Object3D | null
+ *
+ *   // Full-rebuild shapes (rebuildAll = true):
+ *   rebuild?(allFrames, isLive, ctx) → void   (use ctx.addObject to populate scene)
+ *   buildLiveLine?(frameData, allFrames, frameCount, ctx) → THREE.Object3D | null
+ *
+ *   // Optional custom G-code path projection:
+ *   getProjectedPaths?() → Array<Array<{nx,ny}>>
+ * }
+ *
+ * ctx passed to every plugin function:
+ * {
+ *   THREE, scene, cfg: { ampScale, maxFrames }, scaleFactor,
+ *   constants: { SCENE_W, SCENE_DEPTH, INNER_R, OUTER_R, SPIRAL_TURNS, LISS_SCALE, … },
+ *   makeLine(pos, frameIndex, isLive) → THREE.Line,
+ *   toMono(frameData)  → Float32Array,
+ *   isStereo(frameData) → boolean,
+ *   addObject(obj)     — push obj to waveLines and add to THREE scene,
+ * }
+ */
+
+/** @type {Map<string, object>} */
+const _plugins = new Map();
+
+/**
+ * Register a visualization plugin.
+ * Built-in shapes are registered automatically; call this to add custom shapes.
+ * @param {object} plugin
+ */
+export function registerPlugin(plugin) {
+  if (!plugin || typeof plugin.id !== 'string' || !plugin.id) {
+    throw new Error('registerPlugin: plugin.id must be a non-empty string');
+  }
+  if (!plugin.label) throw new Error('registerPlugin: plugin.label is required');
+  _plugins.set(plugin.id, plugin);
+  if (plugin.rebuildAll) REBUILD_ALL_SHAPES.add(plugin.id);
+}
+
+/**
+ * Return metadata for all registered plugins in registration order.
+ * @returns {{ id: string, label: string }[]}
+ */
+export function getPlugins() {
+  return Array.from(_plugins.values()).map(({ id, label }) => ({ id, label }));
+}
+
+// ---------------------------------------------------------------------------
+// Public: shape sets
+// Populated automatically when plugins with rebuildAll:true are registered.
+// ---------------------------------------------------------------------------
+export const REBUILD_ALL_SHAPES = new Set();
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -156,47 +214,18 @@ export function updateLiveLine(frameData, allFrames, frameCount = 0) {
   _disposeLine(liveLine);
   liveLine = null;
 
-  const nextIndex = frameCount;
-
-  if (shape === 'spiral') {
-    if (allFrames && allFrames.length > 0) {
-      const mono    = _toMono(frameData);
-      const preview = [...allFrames, mono];
-      liveLine = _buildSpiralFromData(preview, true);
-      if (liveLine) scene.add(liveLine);
-    }
+  const plugin = _plugins.get(shape);
+  if (plugin && plugin.buildLiveLine) {
+    liveLine = plugin.buildLiveLine(frameData, allFrames, frameCount, _makeCtx());
+    if (liveLine) scene.add(liveLine);
     return;
   }
 
-  // For other REBUILD_ALL shapes: no per-tick live rebuild; the recorded
-  // state already updates at the recording rate.
+  // Rebuild-all shapes with no custom live-line builder: skip live preview.
   if (REBUILD_ALL_SHAPES.has(shape)) return;
 
-  // Per-frame additive shapes: show a live preview of the next frame.
-  if (shape === 'lissajous') {
-    liveLine = _buildLissajousLine(frameData, nextIndex, true);
-    if (liveLine) scene.add(liveLine);
-    return;
-  }
-
-  if (shape === 'circular') {
-    liveLine = _buildCircleLine(_toMono(frameData), nextIndex, true);
-    if (liveLine) scene.add(liveLine);
-    return;
-  }
-
-  if (shape === 'moire') {
-    // Live moire: just show the first ring family
-    const moireLines = _buildMoireLines(frameData, nextIndex, true);
-    if (moireLines.length > 0) {
-      liveLine = moireLines[0];
-      scene.add(liveLine);
-    }
-    return;
-  }
-
-  // linear (default)
-  liveLine = _buildLinearLine(_toMono(frameData), nextIndex, 0, true);
+  // Default fallback for unregistered per-frame shapes.
+  liveLine = _buildLinearLine(_toMono(frameData), frameCount, 0, true);
   if (liveLine) scene.add(liveLine);
 }
 
@@ -264,8 +293,10 @@ export function dispose() {
  */
 export function getProjectedPaths() {
   if (!camera || waveLines.length === 0) return [];
-  if (shape === 'landscape') return _getLandscapeProjectedPaths();
-  if (shape === 'quantized') return _getQuantizedProjectedPaths();
+
+  // Delegate to the plugin's custom projector if one is defined.
+  const plugin = _plugins.get(shape);
+  if (plugin && plugin.getProjectedPaths) return plugin.getProjectedPaths();
 
   camera.updateMatrixWorld();
 
@@ -396,6 +427,33 @@ export function setCameraState(position, target) {
 }
 
 // ---------------------------------------------------------------------------
+// Plugin context factory
+// ---------------------------------------------------------------------------
+
+/**
+ * Build the context object that is passed to every plugin function.
+ * Values are snapshotted at call time (cfg, scaleFactor) so plugins always
+ * see consistent state for the current render tick.
+ */
+function _makeCtx() {
+  return {
+    THREE,
+    scene,
+    cfg: { ...cfg },
+    scaleFactor,
+    constants: {
+      SCENE_W, SCENE_DEPTH, INNER_R, OUTER_R, SPIRAL_TURNS, LISS_SCALE,
+      PAPER_W, PAPER_H, MARGIN_MM, PLOT_W_MM, PLOT_H_MM, CENTER_X_MM,
+    },
+    makeLine:  _makeLine,
+    toMono:    _toMono,
+    isStereo:  _isStereo,
+    /** Push obj into the managed waveLines array and add it to the THREE scene. */
+    addObject(obj) { waveLines.push(obj); scene.add(obj); },
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Central REBUILD_ALL dispatcher
 // ---------------------------------------------------------------------------
 
@@ -404,14 +462,8 @@ function _rebuildAll(allFrames, isLive) {
   waveLines = [];
   if (!allFrames || allFrames.length === 0) return;
 
-  switch (shape) {
-    case 'spiral':       _rebuildSpiral(allFrames, isLive);       break;
-    case 'terrain':      _rebuildTerrain(allFrames, isLive);      break;
-    case 'harmonograph': _rebuildHarmonograph(allFrames, isLive); break;
-    case 'landscape':    _rebuildLandscape(allFrames, isLive);    break;
-    case 'heatmap':      _rebuildHeatmap(allFrames, isLive);      break;
-    case 'quantized':    _rebuildQuantized(allFrames, isLive);    break;
-  }
+  const plugin = _plugins.get(shape);
+  if (plugin && plugin.rebuild) plugin.rebuild(allFrames, isLive, _makeCtx());
 }
 
 // ---------------------------------------------------------------------------
@@ -419,28 +471,12 @@ function _rebuildAll(allFrames, isLive) {
 // ---------------------------------------------------------------------------
 
 function _buildPerFrameLines(frameData, frameIndex, isLive) {
-  switch (shape) {
-    case 'circular':  {
-      const l = _buildCircleLine(_toMono(frameData), frameIndex, isLive);
-      return [l];
-    }
-    case 'lissajous': {
-      const l = _buildLissajousLine(frameData, frameIndex, isLive);
-      return l ? [l] : [];
-    }
-    case 'moire': {
-      return _buildMoireLines(frameData, frameIndex, isLive);
-    }
-    default: {
-      // linear (includes stereo)
-      if (_isStereo(frameData)) {
-        const lLine = _buildLinearLine(frameData.left,  frameIndex, 0, isLive);
-        const rLine = _buildLinearLine(frameData.right, frameIndex, 1, isLive);
-        return [lLine, rLine];
-      }
-      return [_buildLinearLine(frameData, frameIndex, 0, isLive)];
-    }
+  const plugin = _plugins.get(shape);
+  if (plugin && plugin.buildPerFrame) {
+    return plugin.buildPerFrame(frameData, frameIndex, isLive, _makeCtx());
   }
+  // Fallback for unregistered shapes: linear mono line
+  return [_buildLinearLine(_toMono(frameData), frameIndex, 0, isLive)];
 }
 
 // ---------------------------------------------------------------------------
@@ -1438,19 +1474,11 @@ function _rmsOf(data) {
 function _positionCameraForShape(s) {
   if (!camera) return;
 
-  const positions = {
-    linear:       { pos: [0,  8, 28],  lookAt: [0, 0, 10] },
-    circular:     { pos: [0, 22,  3],  lookAt: [0, 0,  0] },
-    spiral:       { pos: [0, 22,  3],  lookAt: [0, 0,  0] },
-    lissajous:    { pos: [0,  0, 22],  lookAt: [0, 0,  0] },
-    terrain:      { pos: [0,  8, 28],  lookAt: [0, 0, 10] },
-    harmonograph: { pos: [0, 12, 22],  lookAt: [0, 0,  0] },
-    moire:        { pos: [0, 22,  3],  lookAt: [0, 0,  0] },
-    landscape:    { pos: [0,  6, 28],  lookAt: [0, 1, 10] },
-    heatmap:      { pos: [0, 22,  3],  lookAt: [0, 0,  0] },
-    quantized:    { pos: [0,  6, 28],  lookAt: [0, 1, 10] },
-  };
-  const { pos, lookAt } = positions[s] || positions.linear;
+  const plugin = _plugins.get(s);
+  const cam = plugin && plugin.cameraPosition;
+  const pos    = (cam && cam.pos)    || [0, 8, 28];
+  const lookAt = (cam && cam.lookAt) || [0, 0, 10];
+
   camera.position.set(...pos);
   camera.lookAt(...lookAt);
   controls.target.set(...lookAt);
@@ -1481,3 +1509,139 @@ function _onResize() {
   camera.updateProjectionMatrix();
   renderer.setSize(w, h, false);
 }
+
+// ---------------------------------------------------------------------------
+// Built-in plugin registrations
+// Each shape is registered here so that the plugin registry is the single
+// source of truth for shape IDs, labels, camera defaults, and build logic.
+// External code can call registerPlugin() to add new custom shapes.
+// ---------------------------------------------------------------------------
+
+registerPlugin({
+  id: 'linear',
+  label: 'Linear (stacked)',
+  cameraPosition: { pos: [0, 8, 28], lookAt: [0, 0, 10] },
+  buildPerFrame(frameData, frameIndex, isLive) {
+    if (_isStereo(frameData)) {
+      return [
+        _buildLinearLine(frameData.left,  frameIndex, 0, isLive),
+        _buildLinearLine(frameData.right, frameIndex, 1, isLive),
+      ];
+    }
+    return [_buildLinearLine(_toMono(frameData), frameIndex, 0, isLive)];
+  },
+  buildLiveLine(frameData, allFrames, frameCount) {
+    return _buildLinearLine(_toMono(frameData), frameCount, 0, true);
+  },
+});
+
+registerPlugin({
+  id: 'circular',
+  label: 'Circular (concentric)',
+  cameraPosition: { pos: [0, 22, 3], lookAt: [0, 0, 0] },
+  buildPerFrame(frameData, frameIndex, isLive) {
+    return [_buildCircleLine(_toMono(frameData), frameIndex, isLive)];
+  },
+  buildLiveLine(frameData, allFrames, frameCount) {
+    return _buildCircleLine(_toMono(frameData), frameCount, true);
+  },
+});
+
+registerPlugin({
+  id: 'spiral',
+  label: 'Spiral',
+  rebuildAll: true,
+  cameraPosition: { pos: [0, 22, 3], lookAt: [0, 0, 0] },
+  rebuild(allFrames, isLive) {
+    _rebuildSpiral(allFrames, isLive);
+  },
+  buildLiveLine(frameData, allFrames) {
+    if (allFrames && allFrames.length > 0) {
+      const mono = _toMono(frameData);
+      return _buildSpiralFromData([...allFrames, mono], true);
+    }
+    return null;
+  },
+});
+
+registerPlugin({
+  id: 'lissajous',
+  label: 'Lissajous (L×R)',
+  cameraPosition: { pos: [0, 0, 22], lookAt: [0, 0, 0] },
+  buildPerFrame(frameData, frameIndex, isLive) {
+    const l = _buildLissajousLine(frameData, frameIndex, isLive);
+    return l ? [l] : [];
+  },
+  buildLiveLine(frameData, allFrames, frameCount) {
+    return _buildLissajousLine(frameData, frameCount, true);
+  },
+});
+
+registerPlugin({
+  id: 'terrain',
+  label: 'Terrain (horizon mask)',
+  rebuildAll: true,
+  cameraPosition: { pos: [0, 8, 28], lookAt: [0, 0, 10] },
+  rebuild(allFrames, isLive) {
+    _rebuildTerrain(allFrames, isLive);
+  },
+});
+
+registerPlugin({
+  id: 'harmonograph',
+  label: 'Harmonograph (pendulum)',
+  rebuildAll: true,
+  cameraPosition: { pos: [0, 12, 22], lookAt: [0, 0, 0] },
+  rebuild(allFrames, isLive) {
+    _rebuildHarmonograph(allFrames, isLive);
+  },
+});
+
+registerPlugin({
+  id: 'moire',
+  label: 'Moiré (offset rings)',
+  cameraPosition: { pos: [0, 22, 3], lookAt: [0, 0, 0] },
+  buildPerFrame(frameData, frameIndex, isLive) {
+    return _buildMoireLines(frameData, frameIndex, isLive);
+  },
+  buildLiveLine(frameData, allFrames, frameCount) {
+    const lines = _buildMoireLines(frameData, frameCount, true);
+    return lines.length > 0 ? lines[0] : null;
+  },
+});
+
+registerPlugin({
+  id: 'landscape',
+  label: 'Landscape (Joy Division)',
+  rebuildAll: true,
+  cameraPosition: { pos: [0, 6, 28], lookAt: [0, 1, 10] },
+  rebuild(allFrames, isLive) {
+    _rebuildLandscape(allFrames, isLive);
+  },
+  getProjectedPaths() {
+    return _getLandscapeProjectedPaths();
+  },
+});
+
+registerPlugin({
+  id: 'heatmap',
+  label: 'Heatmap (spectrogram)',
+  rebuildAll: true,
+  cameraPosition: { pos: [0, 22, 3], lookAt: [0, 0, 0] },
+  rebuild(allFrames, isLive) {
+    _rebuildHeatmap(allFrames, isLive);
+  },
+});
+
+registerPlugin({
+  id: 'quantized',
+  label: 'Quantized Noise',
+  rebuildAll: true,
+  cameraPosition: { pos: [0, 6, 28], lookAt: [0, 1, 10] },
+  rebuild(allFrames, isLive) {
+    _rebuildQuantized(allFrames, isLive);
+  },
+  getProjectedPaths() {
+    return _getQuantizedProjectedPaths();
+  },
+});
