@@ -271,7 +271,7 @@ function catmullRom(pts, steps) {
  * @param {object}  [options]
  * @param {number}  [options.threshold=128]  Grayscale cut-off (0–255)
  * @param {boolean} [options.invert=false]   Treat light pixels as foreground
- * @param {number}  [options.simplify=1.5]   RDP tolerance in doubled pixels
+ * @param {number}  [options.simplify=4.0]   RDP tolerance in doubled pixels
  *                                           (≈ 0.75 real pixels at default)
  * @param {number}  [options.smooth=4]       Catmull-Rom subdivisions per segment
  *                                           (0 or 1 = disabled; 2–8 recommended)
@@ -281,7 +281,7 @@ function catmullRom(pts, steps) {
 export function traceImage(imageData, {
   threshold = 128,
   invert    = false,
-  simplify  = 1.5,
+  simplify  = 4.0,
   smooth    = 4,
   minPoints = 3,
 } = {}) {
