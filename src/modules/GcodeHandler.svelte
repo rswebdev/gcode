@@ -8,11 +8,13 @@
   } from '../stores/gcode.js';
   import { appState } from '../stores/wave.js';
   import * as gcode from '../lib/gcode.js';
+  import ImageToGcodeDialog from './ImageToGcodeDialog.svelte';
 
   let previewCanvas;
   let fileInput;
   let zoomLevel  = 1;
   let showPaths  = true;
+  let showImageDialog = false;
 
   // ---------------------------------------------------------------------------
   // Playback
@@ -356,8 +358,7 @@
     }
   }
 
-  function onTestPattern() {
-    const pw = paper.w, ph = paper.h;
+  function onTestPattern() {    const pw = paper.w, ph = paper.h;
     const plotW = pw - 2 * MARGIN;
     const plotH = ph - 2 * MARGIN;
     const cx = MARGIN + plotW / 2;
@@ -416,6 +417,22 @@
     exportParams.set(null);
     statusText  = `Test pattern loaded — ${paths.length} paths`;
     statusClass = 'done';
+  }
+
+  // ---------------------------------------------------------------------------
+  // Import Image → G-code dialog
+  // ---------------------------------------------------------------------------
+
+  function onImageApply({ detail }) {
+    const { paths, aspect } = detail;
+    importedPathCount.set(paths.length);
+    activePaths.set(paths);
+    stereoPaths.set(null);
+    cameraAspect.set(aspect);
+    exportParams.set(null);
+    statusText  = `Image imported — ${paths.length} path${paths.length !== 1 ? 's' : ''}`;
+    statusClass = 'done';
+    showImageDialog = false;
   }
 
   // ---------------------------------------------------------------------------
@@ -487,6 +504,7 @@
       <div class="btn-group">
         <button on:click={onImportClick}>Import G-code</button>
         <input type="file" accept=".gcode,.nc,.ngc,.txt" class="file-input" bind:this={fileInput} on:change={onFileChange}>
+        <button on:click={() => showImageDialog = true}>Import Image</button>
         <button on:click={onTestPattern}>Test Pattern</button>
       </div>
       <div class="btn-group" style="margin-top:6px">
@@ -594,6 +612,13 @@
     {/if}
   </aside>
 </div>
+
+{#if showImageDialog}
+  <ImageToGcodeDialog
+    on:apply={onImageApply}
+    on:cancel={() => showImageDialog = false}
+  />
+{/if}
 
 <style>
   .layout {
