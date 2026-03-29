@@ -11,6 +11,10 @@
   import * as recorder   from '../lib/recorder.js';
   import * as visualizer from '../lib/visualizer.js';
   import * as noise      from '../lib/noise.js';
+  import {
+    pluginList, userPluginIds,
+    installPlugin, uninstallPlugin,
+  } from '../lib/pluginLoader.js';
 
   // ---------------------------------------------------------------------------
   // DOM refs for camera inputs (needed to avoid overwriting while user edits)
@@ -18,8 +22,12 @@
   let canvas;
   let camPosInput, camTgtInput;
 
-  let audioReady   = false;
-  let advancedOpen = false;
+  let audioReady     = false;
+  let advancedOpen   = false;
+  let pluginPanelOpen = false;
+  let pluginCode     = '';
+  let installError   = '';
+  let installing     = false;
   let rafId        = null;
   let tickCount    = 0;
   const RAF_FPS    = 60;
@@ -225,6 +233,37 @@
     if (recorder.getFrameCount() === 0) return;
     visualizer.updateConfig(getConfig());
     visualizer.replayFrames(recorder.getFrames());
+  }
+
+  // ---------------------------------------------------------------------------
+  // Plugin manager handlers
+  // ---------------------------------------------------------------------------
+
+  async function onInstallPlugin() {
+    if (!pluginCode.trim()) return;
+    installing   = true;
+    installError = '';
+    try {
+      await installPlugin(pluginCode.trim());
+      pluginCode = '';
+    } catch (err) {
+      installError = String(err.message || err);
+    } finally {
+      installing = false;
+    }
+  }
+
+  function onUninstallPlugin(id) {
+    uninstallPlugin(id);
+  }
+
+  function onPluginFileLoad(e) {
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = ev => { pluginCode = ev.target.result; };
+    reader.readAsText(file);
+    e.target.value = ''; // reset so the same file can be re-selected
   }
 
   // ---------------------------------------------------------------------------
@@ -544,7 +583,7 @@
       <label>
         Shape
         <select value={$settings.shape} on:change={onShapeChange} disabled={isRecording}>
-          {#each visualizer.getPlugins() as plug (plug.id)}
+          {#each $pluginList as plug (plug.id)}
             <option value={plug.id}>{plug.label}</option>
           {/each}
         </select>
@@ -562,6 +601,11 @@
       <!-- Advanced toggle -->
       <a href="#advanced" class="adv-toggle" on:click|preventDefault={() => advancedOpen = !advancedOpen}>
         Advanced {advancedOpen ? '▾' : '▸'}
+      </a>
+
+      <!-- Plugins toggle -->
+      <a href="#plugins" class="adv-toggle" on:click|preventDefault={() => pluginPanelOpen = !pluginPanelOpen}>
+        Plugins {pluginPanelOpen ? '▾' : '▸'}
       </a>
     </div>
 
@@ -688,6 +732,48 @@
       </div>
     </div>
     {/if}
+
+    <!-- Plugin manager panel -->
+    {#if pluginPanelOpen}
+    <div class="advanced-panel plugin-panel">
+      <!-- Installed user plugins -->
+      {#if $userPluginIds.length > 0}
+      <div class="ctrl-row">
+        <span class="plugin-list-label">Installed:</span>
+        {#each $pluginList.filter(p => $userPluginIds.includes(p.id)) as plug (plug.id)}
+          <span class="plugin-chip">
+            {plug.label}
+            <button class="btn-clear" on:click={() => onUninstallPlugin(plug.id)} title="Remove plugin">✕</button>
+          </span>
+        {/each}
+      </div>
+      {/if}
+
+      <!-- Install section -->
+      <div class="ctrl-row plugin-install-row">
+        <textarea
+          class="plugin-code"
+          bind:value={pluginCode}
+          rows="6"
+          spellcheck="false"
+          placeholder={'// Paste plugin code here, then click Install.\n// Plugin must use: export default { id, label, cameraPosition, buildPerFrame(frameData, frameIndex, isLive, ctx) { ... } }'}
+        ></textarea>
+        <div class="plugin-actions">
+          <label class="plugin-file-label" title="Load a .js file">
+            Load .js
+            <input type="file" accept=".js" on:change={onPluginFileLoad} style="display:none">
+          </label>
+          <button on:click={onInstallPlugin} disabled={installing || !pluginCode.trim()}>
+            {installing ? 'Installing…' : 'Install'}
+          </button>
+        </div>
+        {#if installError}
+          <span class="plugin-error">{installError}</span>
+        {/if}
+      </div>
+    </div>
+    {/if}
+
   </div>
 </div>
 
@@ -771,5 +857,69 @@
   @keyframes pulse {
     0%, 100% { opacity: 1; }
     50%       { opacity: 0.6; }
+  }
+
+  .plugin-panel {
+    gap: 5px;
+  }
+
+  .plugin-list-label {
+    font-size: 12px;
+    color: #888;
+  }
+
+  .plugin-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    background: rgba(0, 212, 255, 0.1);
+    border: 1px solid #00d4ff44;
+    border-radius: 3px;
+    padding: 1px 4px;
+    font-size: 12px;
+    color: #00d4ff;
+  }
+
+  .plugin-install-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .plugin-code {
+    width: 100%;
+    box-sizing: border-box;
+    resize: vertical;
+    background: #111;
+    color: #ccc;
+    border: 1px solid #333;
+    border-radius: 3px;
+    padding: 5px;
+    font-family: monospace;
+    font-size: 11px;
+    line-height: 1.4;
+  }
+
+  .plugin-actions {
+    display: flex;
+    gap: 6px;
+    margin-top: 4px;
+  }
+
+  .plugin-file-label {
+    cursor: pointer;
+    display: inline-block;
+    padding: 2px 8px;
+    background: #1a1a1a;
+    border: 1px solid #444;
+    border-radius: 3px;
+    font-size: 12px;
+    color: #aaa;
+  }
+
+  .plugin-error {
+    color: #ff6666;
+    font-size: 11px;
+    margin-top: 3px;
+    word-break: break-all;
   }
 </style>

@@ -96,6 +96,16 @@ export function registerPlugin(plugin) {
 }
 
 /**
+ * Remove a previously registered plugin by id.
+ * Has no effect if the plugin is not registered.
+ * @param {string} id
+ */
+export function unregisterPlugin(id) {
+  _plugins.delete(id);
+  REBUILD_ALL_SHAPES.delete(id);
+}
+
+/**
  * Return metadata for all registered plugins in registration order.
  * @returns {{ id: string, label: string }[]}
  */
