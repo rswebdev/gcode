@@ -1,7 +1,7 @@
 <script>
   import { get } from 'svelte/store';
   import { settings } from '../stores/settings.js';
-  import { activePaths, cameraAspect, exportParams, hasPlottablePaths } from '../stores/gcode.js';
+  import { activePaths, cameraAspect, exportParams, hasPlottablePaths, shadingPasses } from '../stores/gcode.js';
   import { connected, sending, available, log, clearLog } from '../stores/serial.js';
   import * as serial from '../lib/serial.js';
   import * as gcode  from '../lib/gcode.js';
@@ -74,9 +74,10 @@
       const paths  = get(activePaths);
       const aspect = get(cameraAspect) || 1;
       const params = get(exportParams) || {};
-      const content = gcode.projectedPathsToGCode(paths, {
-        ...cfg, penDownFeedRate: 300, aspect, params,
-      });
+      const shading = get(shadingPasses);
+      const content = shading?.length
+        ? gcode.imageGCode(paths, shading, { ...cfg, penDownFeedRate: 300, aspect, params })
+        : gcode.projectedPathsToGCode(paths, { ...cfg, penDownFeedRate: 300, aspect, params });
       sending.set(true);
       _setStatus('Sending…', 'active');
       const { cancelled } = await serial.sendGCode(content, (sent, total) => {
