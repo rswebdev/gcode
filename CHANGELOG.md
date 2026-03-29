@@ -7,13 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-03-29
+
+### Removed
+- **5 shapes dropped**: Tube, Phyllotaxis, Flow Field, Epicycles, and Chladni removed from the shape selector, visualizer, help modal, and source-defaults table.
+
+### Fixed
+- **Heatmap plotter output**: All circles were collected into a single `THREE.LineSegments` object. `getProjectedPaths()` treated the flat vertex buffer as a continuous polyline, creating diagonal pen-down connections between every adjacent arc-segment pair. Each circle is now emitted as its own closed `THREE.Line`.
+- **Lissajous plotter output**: Frames traced an open parametric curve (512 samples, 1.5 sine cycles) so the last vertex was geometrically distant from the first, causing a diagonal gap stroke on the plotter. Each frame now appends a closing vertex equal to its first point.
+
 ## [1.3.1] - 2026-03-28
 
 ### Tooling
 - **ESLint + svelte-check**: Added `npm run lint` (ESLint with `eslint-plugin-svelte`) and `npm run check` (svelte-check) quality scripts; fixed 10 pre-existing lint errors (empty catch blocks, missing `{#each}` keys, false-positive reactive loop).
-- **Playwright smoke tests**: New `tests/smoke.test.js` with 11 browser smoke tests covering page load, tab switching, help modal, shape selector completeness (all 15 shapes), and source selector.
+- **Playwright smoke tests**: New `tests/smoke.test.js` with 11 browser smoke tests covering page load, tab switching, help modal, shape selector completeness, and source selector.
 - **GPLv3 license**: Added `LICENSE` file.
-- **README overhaul**: Updated quick start to `npm install && npm run dev`, expanded shapes table to 15, updated file structure to reflect Svelte 5 layout, documented Playback and Quantized Noise features.
+- **README overhaul**: Updated quick start to `npm install && npm run dev`, expanded shapes table, updated file structure to reflect Svelte 5 layout, documented Playback and Quantized Noise features.
 
 ## [1.3.0] - 2026-03-27
 

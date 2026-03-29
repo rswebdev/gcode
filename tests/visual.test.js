@@ -14,9 +14,8 @@
 import { test, expect } from '@playwright/test';
 
 const ALL_SHAPES = [
-  'linear', 'circular', 'spiral', 'lissajous', 'phyllotaxis',
-  'tube', 'terrain', 'harmonograph', 'flowfield', 'epicycles',
-  'chladni', 'moire', 'landscape', 'quantized', 'heatmap',
+  'linear', 'circular', 'spiral', 'lissajous',
+  'terrain', 'harmonograph', 'moire', 'landscape', 'quantized', 'heatmap',
 ];
 
 // Per-shape frame counts — shapes that need more frames to produce visible
