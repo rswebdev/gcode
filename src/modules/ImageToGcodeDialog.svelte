@@ -20,13 +20,15 @@
   let simplify   = 4.0;   // RDP tolerance (doubled-pixel units)
   let smooth     = 4;     // Catmull-Rom subdivisions per segment (0/1 = off)
   let minPoints  = 3;     // drop paths shorter than this after simplification
+  let fill        = 'none'; // fill strategy
+  let fillSpacing = 6;      // px between fill strokes/dots
 
   // ── UI state ──────────────────────────────────────────────────────────────
   let statusText = 'Choose an image to begin';
   let isTracing  = false;
 
   // ── Reactive re-trace when settings change ────────────────────────────────
-  $: if (imageData) retrace(threshold, invert, simplify, smooth, minPoints);
+  $: if (imageData) retrace(threshold, invert, simplify, smooth, minPoints, fill, fillSpacing);
 
   // ── Image loading ─────────────────────────────────────────────────────────
 
@@ -59,7 +61,7 @@
       URL.revokeObjectURL(url);
 
       await tick(); // wait for canvas element to mount
-      retrace(threshold, invert, simplify, smooth, minPoints);
+      retrace(threshold, invert, simplify, smooth, minPoints, fill, fillSpacing);
     };
     image.onerror = () => {
       statusText = 'Failed to load image';
@@ -70,15 +72,14 @@
 
   // ── Tracing ───────────────────────────────────────────────────────────────
 
-  function retrace(_t, _i, _s, _sm, _m) {
+  function retrace(_t, _i, _s, _sm, _m, _f, _fs) {
     if (!imageData) return;
     isTracing = true;
     statusText = 'Tracing…';
 
-    // Defer to next task so the UI can show the "Tracing…" state first.
     setTimeout(() => {
       tracedPaths = traceImage(imageData, {
-        threshold, invert, simplify, smooth, minPoints,
+        threshold, invert, simplify, smooth, minPoints, fill, fillSpacing,
       });
       statusText = tracedPaths.length
         ? `${tracedPaths.length} path${tracedPaths.length !== 1 ? 's' : ''} traced`
@@ -243,6 +244,28 @@
             <input type="number" min="2" max="50" step="1"
                    bind:value={minPoints} class="num-input">
           </label>
+        </section>
+
+        <section>
+          <h3>Fill</h3>
+          <label>
+            Style
+            <select bind:value={fill} class="fill-select">
+              <option value="none">None (contours only)</option>
+              <option value="lines">Horizontal lines</option>
+              <option value="crosshatch">Cross-hatch (H+V)</option>
+              <option value="diagonal">Diagonal lines (45°)</option>
+              <option value="stipple">Stipple (dots)</option>
+            </select>
+          </label>
+          {#if fill !== 'none'}
+            <label>
+              Spacing
+              <span class="value-badge">{fillSpacing}px</span>
+            </label>
+            <input type="range" min="2" max="24" step="1"
+                   bind:value={fillSpacing} class="full-range">
+          {/if}
         </section>
 
         <section class="status-section">
@@ -429,6 +452,11 @@
   .num-input {
     width: 56px;
     text-align: right;
+  }
+
+  .fill-select {
+    max-width: 130px;
+    font-size: 11px;
   }
 
   /* Status */
