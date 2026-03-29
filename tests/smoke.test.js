@@ -23,17 +23,17 @@ test('page title contains G-code', async ({ page }) => {
 
 test('three tabs are visible', async ({ page }) => {
   await page.goto('/');
-  await expect(page.getByRole('button', { name: 'Wave' })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'G-code' })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Serial' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Wave',   exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'G-code', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Serial', exact: true })).toBeVisible();
 });
 
 test('tab switching shows the correct panel', async ({ page }) => {
   await page.goto('/');
   // Wave tab is active by default
-  const waveBtn   = page.getByRole('button', { name: 'Wave' });
-  const gcodeBtn  = page.getByRole('button', { name: 'G-code' });
-  const serialBtn = page.getByRole('button', { name: 'Serial' });
+  const waveBtn   = page.getByRole('button', { name: 'Wave',   exact: true });
+  const gcodeBtn  = page.getByRole('button', { name: 'G-code', exact: true });
+  const serialBtn = page.getByRole('button', { name: 'Serial', exact: true });
 
   await expect(waveBtn).toHaveClass(/active/);
 
@@ -92,7 +92,7 @@ test('help modal lists all 15 shapes', async ({ page }) => {
     'Epicycles', 'Chladni', 'Moiré', 'Heatmap', 'Quantized Noise',
   ];
   for (const name of expectedShapes) {
-    await expect(modal.getByText(name, { exact: false })).toBeVisible();
+    await expect(modal.getByText(name, { exact: true })).toBeVisible();
   }
 });
 
