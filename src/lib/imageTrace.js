@@ -42,24 +42,36 @@ const CELL_SEGS = [
 ];
 
 // ---------------------------------------------------------------------------
-// Step 1 – Binarise
+// Step 1 – Binarise / Grayscale
 // ---------------------------------------------------------------------------
 
 /**
- * Converts RGBA ImageData to a binary Uint8Array (1 = foreground).
- * Grayscale is computed with the standard luminance formula; alpha is applied.
+ * Returns raw luminance (0–255) for every pixel, with alpha premultiplied.
+ * invert=true returns 255-luminance so bright pixels become "dark" in the map.
  */
-function binarize(imageData, threshold, invert) {
+function grayscale(imageData, invert) {
   const { width, height, data } = imageData;
-  const bin = new Uint8Array(width * height);
+  const gray = new Uint8Array(width * height);
   for (let i = 0; i < width * height; i++) {
     const r = data[i * 4];
     const g = data[i * 4 + 1];
     const b = data[i * 4 + 2];
     const a = data[i * 4 + 3];
-    const gray = (0.299 * r + 0.587 * g + 0.114 * b) * (a / 255);
-    const inside = gray < threshold;
-    bin[i] = (inside !== invert) ? 1 : 0;
+    let v = (0.299 * r + 0.587 * g + 0.114 * b) * (a / 255);
+    gray[i] = Math.round(invert ? 255 - v : v);
+  }
+  return gray;
+}
+
+/**
+ * Returns a binary Uint8Array where pixels whose (possibly inverted) luminance
+ * falls in [lo, hi) are 1.  Used to isolate a single brightness band for
+ * multi-level shading.
+ */
+function _bandBin(gray, lo, hi) {
+  const bin = new Uint8Array(gray.length);
+  for (let i = 0; i < gray.length; i++) {
+    bin[i] = gray[i] >= lo && gray[i] < hi ? 1 : 0;
   }
   return bin;
 }
@@ -369,8 +381,35 @@ function fillStipple(bin, width, height, spacing) {
 // Public API
 // ---------------------------------------------------------------------------
 
+const SHADE_LABELS = [
+  ['Shade'],
+  ['Dark', 'Light'],
+  ['Dark', 'Medium', 'Light'],
+  ['Very Dark', 'Dark', 'Medium', 'Light'],
+];
+
 /**
- * Traces contours in a raster image and returns them as NDC paths.
+ * Generates one set of fill paths for a specific brightness band.
+ * @param {string}    fill      Fill strategy name
+ * @param {Uint8Array} bin      Binary mask (1 = fill this pixel)
+ * @param {number}    width
+ * @param {number}    height
+ * @param {number}    spacing   Pixel spacing between strokes
+ * @returns {Array<Array<{nx,ny}>>}
+ */
+function _makeFillPaths(fill, bin, width, height, spacing) {
+  let rawFill = [];
+  if (fill === 'lines')           rawFill = fillHorizontal(bin, width, height, spacing);
+  else if (fill === 'crosshatch') rawFill = fillCrosshatch(bin, width, height, spacing);
+  else if (fill === 'diagonal')   rawFill = fillDiagonal(bin, width, height, spacing);
+  else if (fill === 'stipple')    rawFill = fillStipple(bin, width, height, spacing);
+  return rawFill
+    .filter(seg => seg.length >= 2)
+    .map(seg => seg.map(([x, y]) => _toNdc(x, y, width, height)));
+}
+
+/**
+ * Traces contours in a raster image and returns structured path data.
  *
  * Coordinate conventions:
  *   - NDC x: -1 = left edge of image, +1 = right edge
@@ -387,8 +426,15 @@ function fillStipple(bin, width, height, spacing) {
  * @param {string}  [options.fill='none']     Fill strategy:
  *                                            'none' | 'lines' | 'crosshatch' |
  *                                            'diagonal' | 'stipple'
- * @param {number}  [options.fillSpacing=6]   Pixel spacing between fill strokes/dots
- * @returns {Array<Array<{nx:number, ny:number}>>}
+ * @param {number}  [options.fillSpacing=6]   Pixel spacing for the densest shade level
+ * @param {number}  [options.shadeLevels=1]   Number of brightness bands (1–4).
+ *                                            Each level becomes a separate shading pass
+ *                                            with M0 pause for pen swap.
+ *                                            Level 0 = darkest/densest.
+ * @returns {{
+ *   contourPaths: Array<Array<{nx:number, ny:number}>>,
+ *   shadingPasses: Array<{ label:string, paths:Array<Array<{nx:number, ny:number}>> }>
+ * }}
  */
 export function traceImage(imageData, {
   threshold   = 128,
@@ -398,40 +444,52 @@ export function traceImage(imageData, {
   minPoints   = 3,
   fill        = 'none',
   fillSpacing = 6,
+  shadeLevels = 1,
 } = {}) {
   const { width, height } = imageData;
-  if (width < 2 || height < 2) return [];
+  if (width < 2 || height < 2) return { contourPaths: [], shadingPasses: [] };
 
-  const bin      = binarize(imageData, threshold, invert);
+  const gray = grayscale(imageData, invert);
+
+  // Binary map at threshold for contour tracing
+  const bin      = new Uint8Array(gray.length);
+  for (let i = 0; i < gray.length; i++) bin[i] = gray[i] < threshold ? 1 : 0;
+
   const adj      = buildAdjacency(bin, width, height);
   const rawPaths = tracePaths(adj);
 
-  const paths = [];
-
   // ── Contour paths (marching squares → RDP → Catmull-Rom) ──────────────
+  const contourPaths = [];
   for (const raw of rawPaths) {
     const simplified = rdp(raw, simplify);
     if (simplified.length < minPoints) continue;
-
     const densified = smooth >= 2 ? catmullRom(simplified, smooth) : simplified;
-
-    // Doubled-integer → NDC (x2/2 = real pixel)
-    paths.push(densified.map(([x2, y2]) => _toNdc(x2 / 2, y2 / 2, width, height)));
+    contourPaths.push(densified.map(([x2, y2]) => _toNdc(x2 / 2, y2 / 2, width, height)));
   }
 
-  // ── Fill paths (straight strokes — no RDP/Catmull-Rom needed) ─────────
-  if (fill !== 'none') {
-    let rawFill = [];
-    if (fill === 'lines')      rawFill = fillHorizontal(bin, width, height, fillSpacing);
-    else if (fill === 'crosshatch') rawFill = fillCrosshatch(bin, width, height, fillSpacing);
-    else if (fill === 'diagonal')   rawFill = fillDiagonal(bin, width, height, fillSpacing);
-    else if (fill === 'stipple')    rawFill = fillStipple(bin, width, height, fillSpacing);
+  // ── Shading passes (fill, split into brightness bands) ────────────────
+  const shadingPasses = [];
 
-    for (const seg of rawFill) {
-      if (seg.length < 2) continue;
-      paths.push(seg.map(([x, y]) => _toNdc(x, y, width, height)));
+  if (fill !== 'none') {
+    const levels = Math.max(1, Math.min(4, shadeLevels));
+    const labels = SHADE_LABELS[levels - 1];
+    // Spacing multiplier per level: level 0 = densest, increases by 80% per step
+    const spacingMultipliers = [1, 1.8, 2.6, 3.4];
+
+    for (let lvl = 0; lvl < levels; lvl++) {
+      const bandBin = levels === 1
+        ? bin   // single level: use the full foreground binary map
+        : _bandBin(gray, Math.floor(lvl * threshold / levels),
+                         Math.floor((lvl + 1) * threshold / levels));
+
+      const spacing = fillSpacing * spacingMultipliers[lvl];
+      const paths   = _makeFillPaths(fill, bandBin, width, height, spacing);
+
+      if (paths.length > 0) {
+        shadingPasses.push({ label: labels[lvl], paths });
+      }
     }
   }
 
-  return paths;
+  return { contourPaths, shadingPasses };
 }

@@ -604,7 +604,87 @@ export function stereoPathsToGCode(leftPaths, rightPaths, config = {}) {
   return lines.join('\n');
 }
 
-// Compute half-extents (mm) for NDC → paper mapping that preserves the
+/**
+ * Generate multi-pass G-code for an image trace result.
+ *
+ * Pass 1: contour outlines.
+ * Then for each shading pass an M0 pause allows a pen swap before
+ * drawing that shade level.  Darker/denser passes come first.
+ *
+ * @param {Array<Array<{nx,ny}>>} contourPaths
+ * @param {Array<{label:string, paths:Array<Array<{nx,ny}>>}>} shadingPasses
+ * @param {object} config  Same shape as projectedPathsToGCode config.
+ * @returns {string}
+ */
+export function imageGCode(contourPaths, shadingPasses, config = {}) {
+  const feedRate    = config.feedRate        ?? 3000;
+  const penDownFeed = config.penDownFeedRate ?? 300;
+  const penUpZ      = config.penUpZ          ?? 5;
+  const penDownZ    = config.penDownZ        ?? 0;
+  const penMode     = config.penMode         ?? 'z';
+  const penUpS      = config.penUpS          ?? 80;
+  const penDownS    = config.penDownS        ?? 50;
+  const penYComp    = config.penYComp        ?? 0;
+  const coreXY      = !!config.coreXY;
+  const offsetX     = config.offsetX ?? 0;
+  const offsetY     = config.offsetY ?? 0;
+  const plotScale   = config.plotScale ?? 1;
+  const dims        = _paperCtx(config);
+  const ow = dims ? dims.ow : PLOT_W;
+  const oh = dims ? dims.oh : PLOT_H;
+  const { sx: sxR, sy: syR } = _ndcScales(config.aspect ?? 1, ow, oh);
+  const sx = sxR * plotScale;
+  const sy = syR * plotScale;
+  const penOpts = { penMode, penUpZ, penDownZ, penDownFeed, penUpS, penDownS, penYComp };
+  const pw = config.paperW ?? PAPER_W;
+  const ph = config.paperH ?? PAPER_H;
+  const totalPasses = 1 + (shadingPasses?.length ?? 0);
+
+  const lines = [];
+  lines.push(`; Image Trace G-code — ${contourPaths.length} contour paths, ${totalPasses} passes`);
+  lines.push(`; Generated: ${new Date().toISOString()}`);
+  lines.push(`; Paper: ${pw}x${ph}mm | Plot area: ${ow}x${oh}mm`);
+  if (totalPasses > 1) lines.push(`; M0 pauses allow pen swap between passes`);
+  lines.push(`G21          ; Units: millimetres`);
+  lines.push(`G90          ; Absolute positioning`);
+  _penUp(lines, penOpts);
+  lines.push('');
+
+  function _writePaths(paths) {
+    for (const path of _sortPaths(paths)) {
+      if (path.length < 2) continue;
+      const { px: x0, py: y0 } = _ndcToPaper(path[0].nx, path[0].ny, sx, sy, offsetX, offsetY, dims);
+      lines.push(`G0 ${_xy(x0, y0, coreXY)}`);
+      _penDown(lines, penOpts, y0);
+      for (let i = 1; i < path.length; i++) {
+        const { px, py } = _ndcToPaper(path[i].nx, path[i].ny, sx, sy, offsetX, offsetY, dims);
+        lines.push(`G1 ${_xy(px, py, coreXY)} F${feedRate}`);
+      }
+      _penUp(lines, penOpts);
+    }
+  }
+
+  lines.push(`; ===== PASS 1 / ${totalPasses}: Contours =====`);
+  _writePaths(contourPaths);
+
+  for (let i = 0; i < (shadingPasses?.length ?? 0); i++) {
+    const pass = shadingPasses[i];
+    if (!pass.paths.length) continue;
+    lines.push('');
+    _penUp(lines, penOpts);
+    lines.push(`M0           ; Pause — swap pen for shading: ${pass.label}`);
+    lines.push('');
+    lines.push(`; ===== PASS ${i + 2} / ${totalPasses}: ${pass.label} =====`);
+    _writePaths(pass.paths);
+  }
+
+  lines.push('');
+  _penUp(lines, penOpts);
+  lines.push(`G0 X0.000 Y0.000`);
+  lines.push(`M2`);
+
+  return lines.join('\n');
+}
 // viewport aspect ratio via a "contain" fit (like CSS object-fit: contain).
 // aspect = canvas_width / canvas_height (from camera.aspect).
 // Accept optional plotW/plotH overrides (default: A4 plot area).
