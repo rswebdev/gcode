@@ -1,17 +1,12 @@
 /**
  * visualizer.js
- * Three.js 3D scene. Supports thirteen shapes:
+ * Three.js 3D scene. Supports ten shapes:
  *   linear      — stacked wave lines (Joy Division)
  *   circular    — concentric amplitude rings on the XZ plane
  *   spiral      — one continuous spiral, rebuilt on each new frame
  *   lissajous   — L-channel vs R-channel scatter/trace
- *   phyllotaxis — golden-angle dot / line spiral, amplitude modulates radius
- *   tube        — audio-modulated helix tube with rib cross-sections
  *   terrain     — horizon-masked Joy Division (painters-algorithm occlusion)
  *   harmonograph— two-pendulum Lissajous with damping, driven by dominant FFT bins
- *   flowfield   — streamlines through an FFT-derived 2-D vector field
- *   epicycles   — DFT epicycle arm snapshot per frame, layered in Z
- *   chladni     — Chladni nodal pattern zero-crossings driven by dominant frequency
  *   moire       — two offset concentric ring families per frame
  *   landscape   — Joy Division occlusion ridges with opaque fill polygons
  *   heatmap     — frequency spectrogram grid with cross-hatch density
@@ -37,14 +32,6 @@ const PLOT_W_MM     = PAPER_W - 2 * MARGIN_MM;
 const PLOT_H_MM     = PAPER_H - 2 * MARGIN_MM;
 const CENTER_X_MM   = MARGIN_MM + PLOT_W_MM / 2;
 
-// Golden angle for phyllotaxis
-const GOLDEN_ANGLE  = Math.PI * (3 - Math.sqrt(5));
-
-// Helix parameters for tube shape
-const R_HELIX  = 4;
-const H_HELIX  = 12;
-const RIB_SEGS = 8;
-
 // ---------------------------------------------------------------------------
 // State
 // ---------------------------------------------------------------------------
@@ -61,7 +48,7 @@ let scaleFactor = 1.0;     // global scale for rendering (applied to XZ plane)
 // a new frame is added. Per-frame shapes append one (or more) lines.
 // ---------------------------------------------------------------------------
 export const REBUILD_ALL_SHAPES = new Set([
-  'spiral', 'phyllotaxis', 'tube', 'flowfield', 'terrain', 'harmonograph', 'chladni', 'landscape', 'heatmap', 'quantized',
+  'spiral', 'terrain', 'harmonograph', 'landscape', 'heatmap', 'quantized',
 ]);
 
 // ---------------------------------------------------------------------------
@@ -98,7 +85,7 @@ export function init(canvas, config) {
 
 /**
  * Switch rendering shape. Clears all existing lines and repositions camera.
- * @param {'linear'|'circular'|'spiral'|'lissajous'|'phyllotaxis'|'tube'|'terrain'|'harmonograph'|'flowfield'|'epicycles'|'chladni'|'moire'|'landscape'|'heatmap'} newShape
+ * @param {'linear'|'circular'|'spiral'|'lissajous'|'terrain'|'harmonograph'|'moire'|'landscape'|'heatmap'|'quantized'} newShape
  */
 export function setShape(newShape) {
   shape = newShape;
@@ -194,12 +181,6 @@ export function updateLiveLine(frameData, allFrames, frameCount = 0) {
 
   if (shape === 'circular') {
     liveLine = _buildCircleLine(_toMono(frameData), nextIndex, true);
-    if (liveLine) scene.add(liveLine);
-    return;
-  }
-
-  if (shape === 'epicycles') {
-    liveLine = _buildEpicyclesLine(frameData, nextIndex, true);
     if (liveLine) scene.add(liveLine);
     return;
   }
@@ -425,12 +406,8 @@ function _rebuildAll(allFrames, isLive) {
 
   switch (shape) {
     case 'spiral':       _rebuildSpiral(allFrames, isLive);       break;
-    case 'phyllotaxis':  _rebuildPhyllotaxis(allFrames, isLive);  break;
-    case 'tube':         _rebuildTube(allFrames, isLive);         break;
     case 'terrain':      _rebuildTerrain(allFrames, isLive);      break;
     case 'harmonograph': _rebuildHarmonograph(allFrames, isLive); break;
-    case 'flowfield':    _rebuildFlowField(allFrames, isLive);    break;
-    case 'chladni':      _rebuildChladni(allFrames, isLive);      break;
     case 'landscape':    _rebuildLandscape(allFrames, isLive);    break;
     case 'heatmap':      _rebuildHeatmap(allFrames, isLive);      break;
     case 'quantized':    _rebuildQuantized(allFrames, isLive);    break;
@@ -449,10 +426,6 @@ function _buildPerFrameLines(frameData, frameIndex, isLive) {
     }
     case 'lissajous': {
       const l = _buildLissajousLine(frameData, frameIndex, isLive);
-      return l ? [l] : [];
-    }
-    case 'epicycles': {
-      const l = _buildEpicyclesLine(frameData, frameIndex, isLive);
       return l ? [l] : [];
     }
     case 'moire': {
@@ -577,7 +550,7 @@ function _buildLissajousLine(frameData, frameIndex, isLive) {
   }
 
   const N   = left.length;
-  const pos = new Float32Array(N * 3);
+  const pos = new Float32Array((N + 1) * 3);
   const zOffset = frameIndex * 0.08;
 
   for (let i = 0; i < N; i++) {
@@ -585,142 +558,16 @@ function _buildLissajousLine(frameData, frameIndex, isLive) {
     pos[i * 3 + 1] = right[i] * LISS_SCALE;
     pos[i * 3 + 2] = zOffset;
   }
+  // Close the curve: repeat first point
+  pos[N * 3]     = left[0]  * LISS_SCALE;
+  pos[N * 3 + 1] = right[0] * LISS_SCALE;
+  pos[N * 3 + 2] = zOffset;
   return _makeLine(pos, frameIndex, isLive);
 }
 
 // ---------------------------------------------------------------------------
 // Shape geometry builders — NEW
 // ---------------------------------------------------------------------------
-
-/**
- * Phyllotaxis — golden-angle positioned dots connected in order.
- * Each sample across all frames is placed at angle = gi * GOLDEN_ANGLE,
- * radius = OUTER_R * sqrt(gi / total), amplitude modulates radius.
- */
-function _rebuildPhyllotaxis(allFrames, isLive) {
-  if (!allFrames || allFrames.length === 0) return;
-
-  const F     = allFrames.length;
-  const N     = _toMono(allFrames[0]).length;
-  const total = F * N;
-  const pos   = new Float32Array(total * 3);
-
-  for (let gi = 0; gi < total; gi++) {
-    const fi  = Math.floor(gi / N);
-    const si  = gi % N;
-    const amp = _toMono(allFrames[fi])[si];
-    const t   = gi / Math.max(total - 1, 1);
-    const r   = OUTER_R * Math.sqrt(t) + amp * OUTER_R * 0.12 * cfg.ampScale;
-    const angle = gi * GOLDEN_ANGLE;
-    pos[gi * 3]     = r * Math.cos(angle);
-    pos[gi * 3 + 1] = amp * 1.5 * cfg.ampScale;
-    pos[gi * 3 + 2] = r * Math.sin(angle);
-  }
-
-  const geo = new THREE.BufferGeometry();
-  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-  const color = isLive ? new THREE.Color(0xffffff) : new THREE.Color(0xffaa00);
-  const mat   = new THREE.LineBasicMaterial({ color, transparent: true, opacity: isLive ? 0.5 : 0.8 });
-  const line  = new THREE.Line(geo, mat);
-  waveLines.push(line);
-  scene.add(line);
-}
-
-/**
- * Tube — audio-modulated helix tube with rib cross-sections.
- * Spine follows a helix; at each frame position, an octagonal rib is drawn
- * in the plane perpendicular to the helix tangent.
- */
-function _rebuildTube(allFrames, isLive) {
-  if (!allFrames || allFrames.length === 0) return;
-
-  const F = allFrames.length;
-  const baseRibR = 1.2;
-  const ribAmpScale = 0.8;
-  const helixTurns = 2;
-
-  // Compute spine points
-  const spinePos = new Float32Array(F * 3);
-  const spineAngles = [];
-
-  for (let fi = 0; fi < F; fi++) {
-    const t     = fi / Math.max(F - 1, 1);
-    const angle = t * helixTurns * Math.PI * 2;
-    spineAngles.push(angle);
-    spinePos[fi * 3]     = R_HELIX * Math.cos(angle);
-    spinePos[fi * 3 + 1] = t * H_HELIX - H_HELIX / 2;
-    spinePos[fi * 3 + 2] = R_HELIX * Math.sin(angle);
-  }
-
-  // Spine line
-  const spineGeo = new THREE.BufferGeometry();
-  spineGeo.setAttribute('position', new THREE.BufferAttribute(spinePos, 3));
-  const spineColor = isLive ? new THREE.Color(0xffffff) : new THREE.Color(0x6644ff);
-  const spineMat   = new THREE.LineBasicMaterial({ color: spineColor, transparent: true, opacity: 0.5 });
-  const spineLine  = new THREE.Line(spineGeo, spineMat);
-  waveLines.push(spineLine);
-  scene.add(spineLine);
-
-  // Rib cross-sections — collect all rib pair vertices into a LineSegments
-  const ribVerts = [];
-
-  for (let fi = 0; fi < F; fi++) {
-    const data = _toMono(allFrames[fi]);
-    const rms  = _rmsOf(data);
-    const ribR = baseRibR + rms * ribAmpScale * cfg.ampScale;
-
-    const cx = spinePos[fi * 3];
-    const cy = spinePos[fi * 3 + 1];
-    const cz = spinePos[fi * 3 + 2];
-
-    // Tangent vector (helix direction)
-    const angle  = spineAngles[fi];
-    const tx = -R_HELIX * Math.sin(angle);
-    const ty = H_HELIX / Math.max(F - 1, 1);
-    const tz =  R_HELIX * Math.cos(angle);
-    const tLen = Math.sqrt(tx*tx + ty*ty + tz*tz);
-
-    // Local frame: normal perpendicular to tangent in the XZ plane
-    const nRaw = { x: tz / tLen, y: 0, z: -tx / tLen };
-    const nLen = Math.sqrt(nRaw.x*nRaw.x + nRaw.z*nRaw.z) || 1;
-    const nx = nRaw.x / nLen, nz = nRaw.z / nLen;
-
-    // Compute rib ring points (RIB_SEGS vertices, closed)
-    const ribPts = [];
-    for (let k = 0; k <= RIB_SEGS; k++) {
-      const a = (k / RIB_SEGS) * Math.PI * 2;
-      // Modulate per-sample amplitude around the rib
-      const sampleIdx = Math.floor((k / RIB_SEGS) * (data.length - 1));
-      const sAmp = data[sampleIdx] * ribAmpScale * cfg.ampScale * 0.5;
-      const r = ribR + sAmp;
-      ribPts.push(
-        cx + r * (Math.cos(a) * nx + Math.sin(a) * 0),      // simplified: use 2D in XZ plane of rib
-        cy + r * Math.sin(a),
-        cz + r * (Math.cos(a) * nz)
-      );
-    }
-
-    // Emit as line segments (pairs for closed ring)
-    for (let k = 0; k < RIB_SEGS; k++) {
-      ribVerts.push(
-        ribPts[k * 3], ribPts[k * 3 + 1], ribPts[k * 3 + 2],
-        ribPts[(k+1) * 3], ribPts[(k+1) * 3 + 1], ribPts[(k+1) * 3 + 2]
-      );
-    }
-  }
-
-  if (ribVerts.length > 0) {
-    const ribPos = new Float32Array(ribVerts);
-    const ribGeo = new THREE.BufferGeometry();
-    ribGeo.setAttribute('position', new THREE.BufferAttribute(ribPos, 3));
-    const t = allFrames.length / Math.max(cfg.maxFrames, 1);
-    const ribColor = isLive ? new THREE.Color(0xaaaaaa) : new THREE.Color().setHSL(0.65 + t * 0.1, 0.7, 0.5);
-    const ribMat   = new THREE.LineBasicMaterial({ color: ribColor, transparent: true, opacity: 0.7 });
-    const ribSegs  = new THREE.LineSegments(ribGeo, ribMat);
-    waveLines.push(ribSegs);
-    scene.add(ribSegs);
-  }
-}
 
 /**
  * Terrain — Joy Division horizon-occlusion.
@@ -906,126 +753,6 @@ function _rebuildHarmonograph(allFrames, isLive) {
   const line  = new THREE.Line(geo, mat);
   waveLines.push(line);
   scene.add(line);
-}
-
-/**
- * Flow field — streamlines through a 2-D vector field derived from the avg FFT.
- * All streamlines lie on the Y = 0 plane.
- */
-function _rebuildFlowField(allFrames, isLive) {
-  if (!allFrames || allFrames.length === 0) return;
-
-  const avg = _avgFrames(allFrames);
-  const GN  = 20;  // grid resolution
-
-  // Build GN×GN angle field; map avg[i] → angle
-  const field = new Float32Array(GN * GN);
-  for (let i = 0; i < GN * GN; i++) {
-    field[i] = avg[i % avg.length] * Math.PI * 2;
-  }
-
-  // Bilinear interpolation of field angle at scene coords (x, z)
-  function fieldAngle(x, z) {
-    const nx  = Math.max(0, Math.min(1, (x + 9) / 18));
-    const nz  = Math.max(0, Math.min(1, (z + 9) / 18));
-    const gx  = nx * (GN - 1);
-    const gz  = nz * (GN - 1);
-    const i0  = Math.floor(gx), i1 = Math.min(i0 + 1, GN - 1);
-    const j0  = Math.floor(gz), j1 = Math.min(j0 + 1, GN - 1);
-    const tx  = gx - i0, tz = gz - j0;
-    return  field[j0*GN+i0]*(1-tx)*(1-tz)
-          + field[j0*GN+i1]*tx*(1-tz)
-          + field[j1*GN+i0]*(1-tx)*tz
-          + field[j1*GN+i1]*tx*tz;
-  }
-
-  const SEEDS    = 6;
-  const STEPS    = 40;
-  const STEP_SZ  = 0.35;
-  let   seedIdx  = 0;
-
-  for (let si = 0; si < SEEDS; si++) {
-    for (let sj = 0; sj < SEEDS; sj++) {
-      let x = -8 + si * (16 / (SEEDS - 1));
-      let z = -8 + sj * (16 / (SEEDS - 1));
-
-      const pos = new Float32Array((STEPS + 1) * 3);
-      pos[0] = x; pos[1] = 0; pos[2] = z;
-
-      for (let step = 1; step <= STEPS; step++) {
-        const angle = fieldAngle(x, z);
-        x += Math.cos(angle) * STEP_SZ;
-        z += Math.sin(angle) * STEP_SZ;
-        x = Math.max(-9, Math.min(9, x));
-        z = Math.max(-9, Math.min(9, z));
-        pos[step*3] = x; pos[step*3+1] = 0; pos[step*3+2] = z;
-      }
-
-      const line = _makeLine(pos, seedIdx++, isLive);
-      waveLines.push(line);
-      scene.add(line);
-    }
-  }
-}
-
-/**
- * Chladni — nodal pattern zero-crossing marks.
- * m, n are derived from the dominant frequency bin of the latest frame.
- */
-function _rebuildChladni(allFrames, isLive) {
-  if (!allFrames || allFrames.length === 0) return;
-
-  const latestData  = _toMono(allFrames[allFrames.length - 1]);
-  const { m, n }    = _chladniMN(latestData);
-  const GRID        = 64;
-  const EXTENT      = 9;
-  const tickLen     = 0.3;
-
-  const vertices = [];
-
-  for (let ix = 0; ix < GRID - 1; ix++) {
-    for (let iz = 0; iz < GRID - 1; iz++) {
-      const x  = -EXTENT + ix  * (2 * EXTENT / (GRID - 1));
-      const z  = -EXTENT + iz  * (2 * EXTENT / (GRID - 1));
-      const x1 = -EXTENT + (ix+1) * (2 * EXTENT / (GRID - 1));
-      const z1 = -EXTENT + (iz+1) * (2 * EXTENT / (GRID - 1));
-
-      const px  = x  / EXTENT * Math.PI;
-      const pz  = z  / EXTENT * Math.PI;
-      const px1 = x1 / EXTENT * Math.PI;
-      const pz1 = z1 / EXTENT * Math.PI;
-
-      const v00 = Math.cos(m*px)*Math.cos(n*pz) - Math.cos(n*px)*Math.cos(m*pz);
-      const v10 = Math.cos(m*px1)*Math.cos(n*pz) - Math.cos(n*px1)*Math.cos(m*pz);
-      const v01 = Math.cos(m*px)*Math.cos(n*pz1) - Math.cos(n*px)*Math.cos(m*pz1);
-
-      // X-direction crossing → vertical tick
-      if (v00 * v10 < 0) {
-        const alpha = v00 / (v00 - v10);
-        const cx    = x + alpha * (x1 - x);
-        const midZ  = (z + z1) * 0.5;
-        vertices.push(cx, 0, midZ - tickLen, cx, 0, midZ + tickLen);
-      }
-      // Z-direction crossing → horizontal tick
-      if (v00 * v01 < 0) {
-        const alpha = v00 / (v00 - v01);
-        const cz    = z + alpha * (z1 - z);
-        const midX  = (x + x1) * 0.5;
-        vertices.push(midX - tickLen, 0, cz, midX + tickLen, 0, cz);
-      }
-    }
-  }
-
-  if (vertices.length < 6) return;
-
-  const pos = new Float32Array(vertices);
-  const geo = new THREE.BufferGeometry();
-  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-  const color = isLive ? new THREE.Color(0xffffff) : new THREE.Color(0x88ffdd);
-  const mat   = new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.85 });
-  const segs  = new THREE.LineSegments(geo, mat);
-  waveLines.push(segs);
-  scene.add(segs);
 }
 
 /**
@@ -1314,39 +1041,6 @@ function _rebuildQuantized(allFrames, isLive) {
 }
 
 /**
- * Epicycles — DFT arm snapshot per recorded frame.
- * Each frame shows the position of K spinning arms at a fixed t value.
- */
-function _buildEpicyclesLine(frameData, frameIndex, isLive) {
-  const K    = 16;
-  const mono = _toMono(frameData);
-  const comps = _dftTopK(mono, K);
-  const t    = (frameIndex / Math.max(cfg.maxFrames - 1, 1)) * 2 * Math.PI;
-  const z    = frameIndex * 0.18;
-
-  // Arm trace: K+1 points (start at origin, extend through each arm)
-  const pts = new Float32Array((K + 1) * 3);
-  let cx = 0, cy = 0;
-
-  for (let k = 0; k < K; k++) {
-    const c = comps[k] || { amp: 0, phase: 0, bin: k + 1 };
-    const radius = c.amp * LISS_SCALE * 0.8;
-    const angle  = c.bin * t + c.phase;
-    cx += radius * Math.cos(angle);
-    cy += radius * Math.sin(angle);
-    pts[(k + 1) * 3]     = cx;
-    pts[(k + 1) * 3 + 1] = cy;
-    pts[(k + 1) * 3 + 2] = z;
-  }
-
-  const geo = new THREE.BufferGeometry();
-  geo.setAttribute('position', new THREE.BufferAttribute(pts, 3));
-  const color = isLive ? new THREE.Color(0xffffff) : _frameColor(frameIndex, cfg.maxFrames);
-  const mat   = new THREE.LineBasicMaterial({ color, transparent: true, opacity: isLive ? 0.8 : 0.65 });
-  return new THREE.Line(geo, mat);
-}
-
-/**
  * Moiré — two offset concentric ring families per frame.
  * The second family drifts based on frame index × RMS amplitude.
  */
@@ -1620,9 +1314,6 @@ function _rebuildHeatmap(allFrames, isLive) {
   }
   if (globalMax < 1e-6) globalMax = 1;
 
-  const vertices = [];
-
-  // --- Circles per cell (radius proportional to amplitude) ---
   const maxR  = Math.min(cellW, cellH) * 0.45;  // max circle radius (fits inside cell)
   const gridX = -SCENE_W / 2;
 
@@ -1637,28 +1328,19 @@ function _rebuildHeatmap(allFrames, isLive) {
       const ccx = gridX + (c + 0.5) * cellW + xShift;
       const ccz = fi * cellH + cellH * 0.5;
 
-      // Draw circle as line-segment pairs (closed polygon on XZ plane)
-      for (let s = 0; s < CIRCLE_SEGS; s++) {
-        const a0 = (s / CIRCLE_SEGS) * Math.PI * 2;
-        const a1 = ((s + 1) / CIRCLE_SEGS) * Math.PI * 2;
-        vertices.push(
-          ccx + r * Math.cos(a0), 0, ccz + r * Math.sin(a0),
-          ccx + r * Math.cos(a1), 0, ccz + r * Math.sin(a1)
-        );
+      // Each circle as a closed THREE.Line (CIRCLE_SEGS+1 vertices, last = first)
+      const pos = new Float32Array((CIRCLE_SEGS + 1) * 3);
+      for (let s = 0; s <= CIRCLE_SEGS; s++) {
+        const a = (s / CIRCLE_SEGS) * Math.PI * 2;
+        pos[s * 3]     = ccx + r * Math.cos(a);
+        pos[s * 3 + 1] = 0;
+        pos[s * 3 + 2] = ccz + r * Math.sin(a);
       }
+      const line = _makeLine(pos, fi * COLS + c, isLive);
+      waveLines.push(line);
+      scene.add(line);
     }
   }
-
-  if (vertices.length < 6) return;
-
-  const pos  = new Float32Array(vertices);
-  const geo  = new THREE.BufferGeometry();
-  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-  const color = isLive ? new THREE.Color(0xffffff) : new THREE.Color(0x44ccee);
-  const mat   = new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.85 });
-  const segs  = new THREE.LineSegments(geo, mat);
-  waveLines.push(segs);
-  scene.add(segs);
 }
 
 
@@ -1742,17 +1424,6 @@ function _dftTopK(signal, K) {
   return comps.slice(0, K);
 }
 
-/** Derive Chladni mode numbers {m, n} from dominant frequency content. */
-function _chladniMN(frameData) {
-  const mono  = _toMono(frameData);
-  const comps = _dftTopK(mono, 2);
-  const bin1  = comps[0]?.bin ?? 4;
-  const bin2  = comps[1]?.bin ?? 7;
-  const m = Math.max(1, Math.min(7, 1 + Math.floor(bin1 * 6 / 64)));
-  const n = Math.max(1, Math.min(8, 1 + Math.floor(bin2 * 7 / 64)));
-  return { m, n: m === n ? n + 1 : n };
-}
-
 /** RMS of a Float32Array. */
 function _rmsOf(data) {
   let sum = 0;
@@ -1772,13 +1443,8 @@ function _positionCameraForShape(s) {
     circular:     { pos: [0, 22,  3],  lookAt: [0, 0,  0] },
     spiral:       { pos: [0, 22,  3],  lookAt: [0, 0,  0] },
     lissajous:    { pos: [0,  0, 22],  lookAt: [0, 0,  0] },
-    phyllotaxis:  { pos: [0, 22,  3],  lookAt: [0, 0,  0] },
-    tube:         { pos: [8,  4, 22],  lookAt: [0, 0,  6] },
     terrain:      { pos: [0,  8, 28],  lookAt: [0, 0, 10] },
     harmonograph: { pos: [0, 12, 22],  lookAt: [0, 0,  0] },
-    flowfield:    { pos: [0, 22,  3],  lookAt: [0, 0,  0] },
-    epicycles:    { pos: [0,  5, 20],  lookAt: [0, 0,  0] },
-    chladni:      { pos: [0, 22,  3],  lookAt: [0, 0,  0] },
     moire:        { pos: [0, 22,  3],  lookAt: [0, 0,  0] },
     landscape:    { pos: [0,  6, 28],  lookAt: [0, 1, 10] },
     heatmap:      { pos: [0, 22,  3],  lookAt: [0, 0,  0] },
