@@ -257,6 +257,115 @@ function catmullRom(pts, steps) {
 }
 
 // ---------------------------------------------------------------------------
+// Fill strategies  (operate on real-pixel coordinates)
+// ---------------------------------------------------------------------------
+
+/**
+ * Converts a real-pixel [x, y] point to NDC.
+ * x ∈ [0, width]  → nx ∈ [-1, +1]
+ * y ∈ [0, height] → ny ∈ [+1, -1]  (Y-up)
+ */
+function _toNdc(x, y, width, height) {
+  return { nx: x / width * 2 - 1, ny: 1 - y / height * 2 };
+}
+
+/**
+ * Horizontal scan-line fill: traces the interior of dark regions with
+ * evenly-spaced horizontal strokes.
+ */
+function fillHorizontal(bin, width, height, spacing) {
+  const paths = [];
+  const step = Math.max(1, Math.round(spacing));
+  for (let y = 0; y < height; y += step) {
+    let start = -1;
+    for (let x = 0; x <= width; x++) {
+      const on = x < width && bin[y * width + x];
+      if (on && start < 0) { start = x; }
+      else if (!on && start >= 0) {
+        paths.push([[start, y + 0.5], [x, y + 0.5]]);
+        start = -1;
+      }
+    }
+  }
+  return paths;
+}
+
+/**
+ * Vertical scan-line fill.
+ */
+function fillVertical(bin, width, height, spacing) {
+  const paths = [];
+  const step = Math.max(1, Math.round(spacing));
+  for (let x = 0; x < width; x += step) {
+    let start = -1;
+    for (let y = 0; y <= height; y++) {
+      const on = y < height && bin[y * width + x];
+      if (on && start < 0) { start = y; }
+      else if (!on && start >= 0) {
+        paths.push([[x + 0.5, start], [x + 0.5, y]]);
+        start = -1;
+      }
+    }
+  }
+  return paths;
+}
+
+/**
+ * Diagonal fill at 45°: traces strokes along lines where (x − y) = constant.
+ * Perpendicular spacing = spacing / √2.
+ */
+function fillDiagonal(bin, width, height, spacing) {
+  const paths = [];
+  const step = Math.max(1, Math.round(spacing));
+  // c = x - y; ranges from -(height-1) to (width-1)
+  for (let c = -(height - 1); c < width; c += step) {
+    const xMin = Math.max(0, c);
+    const xMax = Math.min(width - 1, c + height - 1);
+    let start = null;
+    for (let x = xMin; x <= xMax + 1; x++) {
+      const y = x - c;
+      const on = x <= xMax && y >= 0 && y < height && bin[y * width + x];
+      if (on && start === null) { start = [x, y]; }
+      else if (!on && start !== null) {
+        paths.push([start, [x, y]]);
+        start = null;
+      }
+    }
+  }
+  return paths;
+}
+
+/**
+ * Cross-hatch fill: horizontal + vertical strokes combined.
+ */
+function fillCrosshatch(bin, width, height, spacing) {
+  return [
+    ...fillHorizontal(bin, width, height, spacing),
+    ...fillVertical(bin, width, height, spacing),
+  ];
+}
+
+/**
+ * Stipple fill: places small cross-shaped marks at sampled dark positions.
+ * The mark radius scales with spacing so denser settings produce finer dots.
+ */
+function fillStipple(bin, width, height, spacing) {
+  const paths = [];
+  const step = Math.max(1, Math.round(spacing));
+  const r    = Math.max(0.4, step * 0.18); // dot radius
+  const half = Math.floor(step / 2);
+  for (let y = half; y < height; y += step) {
+    for (let x = half; x < width; x += step) {
+      if (bin[y * width + x]) {
+        paths.push([[x - r, y],     [x + r, y]]);      // horizontal arm
+        paths.push([[x,     y - r], [x,     y + r]]); // vertical arm
+      }
+    }
+  }
+  return paths;
+}
+
+// ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
 
@@ -269,21 +378,26 @@ function catmullRom(pts, steps) {
  *
  * @param {ImageData} imageData
  * @param {object}  [options]
- * @param {number}  [options.threshold=128]  Grayscale cut-off (0–255)
- * @param {boolean} [options.invert=false]   Treat light pixels as foreground
- * @param {number}  [options.simplify=4.0]   RDP tolerance in doubled pixels
- *                                           (≈ 0.75 real pixels at default)
- * @param {number}  [options.smooth=4]       Catmull-Rom subdivisions per segment
- *                                           (0 or 1 = disabled; 2–8 recommended)
- * @param {number}  [options.minPoints=3]    Discard paths shorter than this
+ * @param {number}  [options.threshold=128]   Grayscale cut-off (0–255)
+ * @param {boolean} [options.invert=false]    Treat light pixels as foreground
+ * @param {number}  [options.simplify=4.0]    RDP tolerance in doubled pixels
+ * @param {number}  [options.smooth=4]        Catmull-Rom subdivisions per segment
+ *                                            (0 or 1 = disabled; 2–8 recommended)
+ * @param {number}  [options.minPoints=3]     Discard contour paths shorter than this
+ * @param {string}  [options.fill='none']     Fill strategy:
+ *                                            'none' | 'lines' | 'crosshatch' |
+ *                                            'diagonal' | 'stipple'
+ * @param {number}  [options.fillSpacing=6]   Pixel spacing between fill strokes/dots
  * @returns {Array<Array<{nx:number, ny:number}>>}
  */
 export function traceImage(imageData, {
-  threshold = 128,
-  invert    = false,
-  simplify  = 4.0,
-  smooth    = 4,
-  minPoints = 3,
+  threshold   = 128,
+  invert      = false,
+  simplify    = 4.0,
+  smooth      = 4,
+  minPoints   = 3,
+  fill        = 'none',
+  fillSpacing = 6,
 } = {}) {
   const { width, height } = imageData;
   if (width < 2 || height < 2) return [];
@@ -293,21 +407,30 @@ export function traceImage(imageData, {
   const rawPaths = tracePaths(adj);
 
   const paths = [];
+
+  // ── Contour paths (marching squares → RDP → Catmull-Rom) ──────────────
   for (const raw of rawPaths) {
     const simplified = rdp(raw, simplify);
     if (simplified.length < minPoints) continue;
 
-    // Optionally densify with smooth Catmull-Rom curves
     const densified = smooth >= 2 ? catmullRom(simplified, smooth) : simplified;
 
-    // Doubled-integer → NDC
-    // Real pixel:  px = x2 / 2  (0 … width),   py = y2 / 2  (0 … height)
-    // NDC x:  (px / width)  * 2 − 1  =  x2 / width  − 1
-    // NDC y:  1 − (py / height) * 2  =  1 − y2 / height   (Y flipped)
-    paths.push(densified.map(([x2, y2]) => ({
-      nx:  x2 / width  - 1,
-      ny: -y2 / height + 1,
-    })));
+    // Doubled-integer → NDC (x2/2 = real pixel)
+    paths.push(densified.map(([x2, y2]) => _toNdc(x2 / 2, y2 / 2, width, height)));
+  }
+
+  // ── Fill paths (straight strokes — no RDP/Catmull-Rom needed) ─────────
+  if (fill !== 'none') {
+    let rawFill = [];
+    if (fill === 'lines')      rawFill = fillHorizontal(bin, width, height, fillSpacing);
+    else if (fill === 'crosshatch') rawFill = fillCrosshatch(bin, width, height, fillSpacing);
+    else if (fill === 'diagonal')   rawFill = fillDiagonal(bin, width, height, fillSpacing);
+    else if (fill === 'stipple')    rawFill = fillStipple(bin, width, height, fillSpacing);
+
+    for (const seg of rawFill) {
+      if (seg.length < 2) continue;
+      paths.push(seg.map(([x, y]) => _toNdc(x, y, width, height)));
+    }
   }
 
   return paths;
