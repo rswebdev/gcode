@@ -3,7 +3,7 @@
   import { get } from 'svelte/store';
   import { settings } from '../stores/settings.js';
   import {
-    activePaths, stereoPaths, cameraAspect, exportParams,
+    activePaths, stereoPaths, shadingPasses, cameraAspect, exportParams,
     importedPathCount, hasPlottablePaths,
   } from '../stores/gcode.js';
   import { appState } from '../stores/wave.js';
@@ -285,7 +285,28 @@
       ctx.fill();
 
     } else if (showPaths) {
-      // Static mode: draw all paths at once
+      // Static mode: draw shading passes first (behind contours), then contours
+      const shadeColors = ['#cc550044', '#e0770055', '#f0a02066', '#f8cc6077'];
+      const shading = get(shadingPasses);
+      if (shading?.length) {
+        ctx.lineWidth = 0.6;
+        ctx.lineJoin  = 'round';
+        ctx.lineCap   = 'round';
+        for (let si = 0; si < shading.length; si++) {
+          ctx.strokeStyle = shadeColors[si] ?? shadeColors[shadeColors.length - 1];
+          for (const path of shading[si].paths) {
+            if (path.length < 2) continue;
+            ctx.beginPath();
+            for (let i = 0; i < path.length; i++) {
+              const { nx, ny } = path[i];
+              if (i === 0) ctx.moveTo(toCanX(ndcToMmX(nx)), toCanY(ndcToMmY(ny)));
+              else         ctx.lineTo(toCanX(ndcToMmX(nx)), toCanY(ndcToMmY(ny)));
+            }
+            ctx.stroke();
+          }
+        }
+      }
+
       const paths = get(activePaths);
       ctx.strokeStyle = '#00d4ff';
       ctx.lineWidth   = 0.8;
@@ -322,7 +343,7 @@
   }
 
   // Redraw whenever paths, aspect, or relevant settings change
-  $: previewCanvas && ($activePaths, $cameraAspect, $settings.offsetX, $settings.offsetY, $settings.importScale, showPaths, redraw());
+  $: previewCanvas && ($activePaths, $shadingPasses, $cameraAspect, $settings.offsetX, $settings.offsetY, $settings.importScale, showPaths, redraw());
 
   onMount(() => redraw());
   onDestroy(() => pausePlay());
@@ -369,6 +390,7 @@
       importedPathCount.set(paths.length);
       activePaths.set(ndcPaths);
       stereoPaths.set(null);
+      shadingPasses.set(null);
       cameraAspect.set(plotW / plotH);
       exportParams.set(null);
       statusText  = `Imported ${paths.length} paths (${stats.draws} draw moves)`;
@@ -435,6 +457,7 @@
     importedPathCount.set(0);
     activePaths.set(paths);
     stereoPaths.set(null);
+    shadingPasses.set(null);
     cameraAspect.set(testAspect);
     exportParams.set(null);
     statusText  = `Test pattern loaded — ${paths.length} paths`;
@@ -446,13 +469,16 @@
   // ---------------------------------------------------------------------------
 
   function onImageApply({ detail }) {
-    const { paths, aspect } = detail;
-    importedPathCount.set(paths.length);
-    activePaths.set(paths);
+    const { contourPaths, shadingPasses: passes, aspect } = detail;
+    const allPaths = contourPaths;
+    importedPathCount.set(contourPaths.length);
+    activePaths.set(allPaths);
     stereoPaths.set(null);
+    shadingPasses.set(passes?.length ? passes : null);
     cameraAspect.set(aspect);
     exportParams.set(null);
-    statusText  = `Image imported — ${paths.length} path${paths.length !== 1 ? 's' : ''}`;
+    const passInfo = passes?.length ? ` + ${passes.length} shade pass${passes.length !== 1 ? 'es' : ''}` : '';
+    statusText  = `Image imported — ${contourPaths.length} contour${passInfo}`;
     statusClass = 'done';
     showImageDialog = false;
   }
@@ -486,11 +512,20 @@
   function onExport() {
     const paths = get(activePaths);
     if (!paths.length) return;
-    const cfg     = _buildGcodeConfig();
-    const content = gcode.projectedPathsToGCode(paths, cfg);
+    const cfg    = _buildGcodeConfig();
+    const shading = get(shadingPasses);
     const params  = get(exportParams) || {};
-    gcode.downloadGCode(content, gcode.generateFilename(params));
-    statusText = 'G-code exported'; statusClass = 'done';
+    let content, filename;
+    if (shading?.length) {
+      content  = gcode.imageGCode(paths, shading, cfg);
+      filename = gcode.generateFilename(params).replace('.gcode', '-image.gcode');
+      statusText = `G-code exported (${1 + shading.length} passes)`; statusClass = 'done';
+    } else {
+      content  = gcode.projectedPathsToGCode(paths, cfg);
+      filename = gcode.generateFilename(params);
+      statusText = 'G-code exported'; statusClass = 'done';
+    }
+    gcode.downloadGCode(content, filename);
   }
 
   function onExportAnaglyph() {

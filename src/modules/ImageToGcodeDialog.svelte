@@ -9,26 +9,28 @@
   let previewCanvas;
 
   // ── Image state ───────────────────────────────────────────────────────────
-  let imgElement   = null;   // HTMLImageElement for drawing the dimmed background
-  let imageData    = null;   // ImageData at working resolution
-  let imageAspect  = 1;      // width / height of the source image
-  let tracedPaths  = [];     // Array<Array<{nx,ny}>>
+  let imgElement   = null;
+  let imageData    = null;
+  let imageAspect  = 1;
+  let contourPaths = [];                // Array<Array<{nx,ny}>>
+  let shadingPasses = [];               // Array<{label, paths}>
 
   // ── Trace settings ────────────────────────────────────────────────────────
-  let threshold  = 128;   // 1–254
-  let invert     = false;
-  let simplify   = 4.0;   // RDP tolerance (doubled-pixel units)
-  let smooth     = 4;     // Catmull-Rom subdivisions per segment (0/1 = off)
-  let minPoints  = 3;     // drop paths shorter than this after simplification
-  let fill        = 'none'; // fill strategy
-  let fillSpacing = 6;      // px between fill strokes/dots
+  let threshold   = 128;
+  let invert      = false;
+  let simplify    = 4.0;
+  let smooth      = 4;
+  let minPoints   = 3;
+  let fill        = 'none';
+  let fillSpacing = 6;
+  let shadeLevels = 3;    // 1–4 brightness bands, each a separate M0 pass
 
   // ── UI state ──────────────────────────────────────────────────────────────
   let statusText = 'Choose an image to begin';
   let isTracing  = false;
 
   // ── Reactive re-trace when settings change ────────────────────────────────
-  $: if (imageData) retrace(threshold, invert, simplify, smooth, minPoints, fill, fillSpacing);
+  $: if (imageData) retrace(threshold, invert, simplify, smooth, minPoints, fill, fillSpacing, shadeLevels);
 
   // ── Image loading ─────────────────────────────────────────────────────────
 
@@ -61,7 +63,7 @@
       URL.revokeObjectURL(url);
 
       await tick(); // wait for canvas element to mount
-      retrace(threshold, invert, simplify, smooth, minPoints, fill, fillSpacing);
+      retrace(threshold, invert, simplify, smooth, minPoints, fill, fillSpacing, shadeLevels);
     };
     image.onerror = () => {
       statusText = 'Failed to load image';
@@ -72,18 +74,27 @@
 
   // ── Tracing ───────────────────────────────────────────────────────────────
 
-  function retrace(_t, _i, _s, _sm, _m, _f, _fs) {
+  function retrace(_t, _i, _s, _sm, _m, _f, _fs, _sl) {
     if (!imageData) return;
     isTracing = true;
     statusText = 'Tracing…';
 
     setTimeout(() => {
-      tracedPaths = traceImage(imageData, {
-        threshold, invert, simplify, smooth, minPoints, fill, fillSpacing,
+      const result = traceImage(imageData, {
+        threshold, invert, simplify, smooth, minPoints, fill, fillSpacing, shadeLevels,
       });
-      statusText = tracedPaths.length
-        ? `${tracedPaths.length} path${tracedPaths.length !== 1 ? 's' : ''} traced`
-        : 'No paths found — try adjusting threshold or invert';
+      contourPaths  = result.contourPaths;
+      shadingPasses = result.shadingPasses;
+
+      const totalPaths = contourPaths.length + shadingPasses.reduce((n, p) => n + p.paths.length, 0);
+      if (totalPaths === 0) {
+        statusText = 'No paths found — try adjusting threshold or invert';
+      } else if (shadingPasses.length > 0) {
+        const passDesc = shadingPasses.map(p => `${p.paths.length} (${p.label})`).join(', ');
+        statusText = `${contourPaths.length} contour + ${shadingPasses.length} shade passes: ${passDesc}`;
+      } else {
+        statusText = `${contourPaths.length} contour path${contourPaths.length !== 1 ? 's' : ''}`;
+      }
       isTracing = false;
       drawPreview();
     }, 0);
@@ -123,24 +134,34 @@
       ctx.globalAlpha = 1;
     }
 
-    // Overlay traced paths in cyan
-    ctx.strokeStyle = '#00d4ff';
-    ctx.lineWidth   = 1;
-    ctx.lineJoin    = 'round';
-    ctx.lineCap     = 'round';
+    // Overlay contours in cyan
+    ctx.lineWidth = 1;
+    ctx.lineJoin  = 'round';
+    ctx.lineCap   = 'round';
 
-    for (const path of tracedPaths) {
-      if (path.length < 2) continue;
-      ctx.beginPath();
-      for (let i = 0; i < path.length; i++) {
-        const { nx, ny } = path[i];
-        // NDC → canvas:  nx ∈ [-1,1] → [imgX, imgX+imgW];  ny=+1 → top
-        const cx = imgX + (nx + 1) / 2 * imgW;
-        const cy = imgY + (1 - ny) / 2 * imgH;
-        if (i === 0) ctx.moveTo(cx, cy); else ctx.lineTo(cx, cy);
+    function drawPaths(paths, color) {
+      ctx.strokeStyle = color;
+      for (const path of paths) {
+        if (path.length < 2) continue;
+        ctx.beginPath();
+        for (let i = 0; i < path.length; i++) {
+          const { nx, ny } = path[i];
+          const cx = imgX + (nx + 1) / 2 * imgW;
+          const cy = imgY + (1 - ny) / 2 * imgH;
+          if (i === 0) ctx.moveTo(cx, cy); else ctx.lineTo(cx, cy);
+        }
+        ctx.stroke();
       }
-      ctx.stroke();
     }
+
+    // Shade passes first (behind contours), darkest → lightest
+    const shadeColors = ['#cc5500', '#e07700', '#f0a020', '#f8cc60'];
+    for (let i = 0; i < shadingPasses.length; i++) {
+      drawPaths(shadingPasses[i].paths, shadeColors[i] ?? shadeColors[shadeColors.length - 1]);
+    }
+
+    // Contours on top
+    drawPaths(contourPaths, '#00d4ff');
   }
 
   onMount(() => drawPreview());
@@ -148,8 +169,8 @@
   // ── Actions ───────────────────────────────────────────────────────────────
 
   function onApply() {
-    if (!tracedPaths.length) return;
-    dispatch('apply', { paths: tracedPaths, aspect: imageAspect });
+    if (!contourPaths.length && !shadingPasses.length) return;
+    dispatch('apply', { contourPaths, shadingPasses, aspect: imageAspect });
   }
 
   function onCancel() {
@@ -162,7 +183,7 @@
 
   function onKeyDown(e) {
     if (e.key === 'Escape') onCancel();
-    if (e.key === 'Enter' && tracedPaths.length && !isTracing) onApply();
+    if (e.key === 'Enter' && (contourPaths.length || shadingPasses.length) && !isTracing) onApply();
   }
 </script>
 
@@ -265,13 +286,27 @@
             </label>
             <input type="range" min="2" max="24" step="1"
                    bind:value={fillSpacing} class="full-range">
+            <label>
+              Shade levels
+              <span class="value-badge">{shadeLevels}</span>
+            </label>
+            <input type="range" min="1" max="4" step="1"
+                   bind:value={shadeLevels} class="full-range">
+            {#if shadeLevels > 1}
+              <div class="shade-legend">
+                {#each Array(shadeLevels) as _, i (i)}
+                  <span class="shade-dot" style="background:{['#cc5500','#e07700','#f0a020','#f8cc60'][i]}"></span>
+                  <span class="shade-label-text">{['Very Dark','Dark','Medium','Light'].slice(4-shadeLevels)[i]}</span>
+                {/each}
+              </div>
+            {/if}
           {/if}
         </section>
 
         <section class="status-section">
           <div class="status" class:tracing={isTracing}
-               class:ok={!isTracing && tracedPaths.length > 0}
-               class:warn={!isTracing && tracedPaths.length === 0 && !!imageData}>
+               class:ok={!isTracing && (contourPaths.length > 0 || shadingPasses.length > 0)}
+               class:warn={!isTracing && contourPaths.length === 0 && shadingPasses.length === 0 && !!imageData}>
             {statusText}
           </div>
         </section>
@@ -282,7 +317,7 @@
     <!-- Footer -->
     <div class="dialog-footer">
       <button on:click={onCancel}>Cancel</button>
-      <button class="btn-primary" disabled={!tracedPaths.length || isTracing}
+      <button class="btn-primary" disabled={(!contourPaths.length && !shadingPasses.length) || isTracing}
               on:click={onApply}>
         Apply to G-code
       </button>
@@ -458,6 +493,26 @@
     max-width: 130px;
     font-size: 11px;
   }
+
+  .shade-legend {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px 8px;
+    margin-top: 4px;
+    font-size: 10px;
+    color: #666;
+  }
+
+  .shade-dot {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+
+  .shade-label-text { color: #666; }
 
   /* Status */
   .status-section { flex: 1; }

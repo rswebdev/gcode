@@ -7,6 +7,7 @@ import { writable, derived } from 'svelte/store';
 
 export const activePaths       = writable([]);
 export const stereoPaths       = writable(null);
+export const shadingPasses     = writable(/** @type {Array<{label:string,paths:Array}>|null} */ (null));
 export const importedPathCount = writable(0);
 export const cameraAspect      = writable(1);
 export const exportParams      = writable(null); // snapshot of generation params at capture time
