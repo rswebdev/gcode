@@ -12,6 +12,10 @@
   let previewCanvas;
   let fileInput;
   let zoomLevel  = 1;
+  let panX       = 0;
+  let panY       = 0;
+  let _isDragging = false;
+  let _dragLast   = { x: 0, y: 0 };
   let showPaths  = true;
   let showImageDialog = false;
 
@@ -281,9 +285,9 @@
     const ndcToMmX = (nx) => centerX + nx * sx + offsetX;
     const ndcToMmY = (ny) => centerY + ny * sy + offsetY;
 
-    // Zoom transform around center
+    // Zoom + pan transform (zoom around canvas center offset by pan)
     ctx.save();
-    ctx.translate(W / 2, H / 2);
+    ctx.translate(W / 2 + panX, H / 2 + panY);
     ctx.scale(zoomLevel, zoomLevel);
     ctx.translate(-W / 2, -H / 2);
 
@@ -493,12 +497,34 @@
 
   function onWheel(e) {
     e.preventDefault();
-    const delta = e.deltaY > 0 ? 0.9 : 1.1;
-    zoomLevel = Math.max(0.25, Math.min(8, zoomLevel * delta));
+    const rect = previewCanvas.getBoundingClientRect();
+    const mx = e.clientX - rect.left;
+    const my = e.clientY - rect.top;
+    const W  = rect.width, H = rect.height;
+    const factor  = e.deltaY > 0 ? 0.9 : 1.1;
+    const newZoom = Math.max(0.25, Math.min(8, zoomLevel * factor));
+    // Keep the canvas point under the cursor fixed while zooming
+    panX = panX + (mx - W / 2 - panX) * (1 - newZoom / zoomLevel);
+    panY = panY + (my - H / 2 - panY) * (1 - newZoom / zoomLevel);
+    zoomLevel = newZoom;
     redraw();
   }
 
-  function resetZoom() { zoomLevel = 1; redraw(); }
+  function onCanvasMouseDown(e) {
+    if (e.button !== 0) return;
+    _isDragging = true;
+    _dragLast = { x: e.offsetX, y: e.offsetY };
+  }
+  function onCanvasMouseMove(e) {
+    if (!_isDragging) return;
+    panX += e.offsetX - _dragLast.x;
+    panY += e.offsetY - _dragLast.y;
+    _dragLast = { x: e.offsetX, y: e.offsetY };
+    redraw();
+  }
+  function onCanvasMouseUp() { _isDragging = false; }
+
+  function resetZoom() { zoomLevel = 1; panX = 0; panY = 0; redraw(); }
 
   // ---------------------------------------------------------------------------
   // Import G-code
@@ -686,7 +712,12 @@
   <!-- 2D preview canvas -->
   <div class="preview-area">
     <canvas bind:this={previewCanvas} class="preview-canvas"
-            on:wheel|nonpassive|preventDefault={onWheel}></canvas>
+            class:dragging={_isDragging}
+            on:wheel|nonpassive|preventDefault={onWheel}
+            on:mousedown={onCanvasMouseDown}
+            on:mousemove={onCanvasMouseMove}
+            on:mouseup={onCanvasMouseUp}
+            on:mouseleave={onCanvasMouseUp}></canvas>
     {#if !$hasPlottablePaths}
       <div class="preview-hint">
         Record a wave pattern and click <strong>Pattern → G-code</strong> in the Wave tab,<br>
@@ -856,8 +887,9 @@
     width: 100%;
     height: 100%;
     display: block;
-    cursor: crosshair;
+    cursor: grab;
   }
+  .preview-canvas.dragging { cursor: grabbing; }
 
   .preview-hint {
     position: absolute;
