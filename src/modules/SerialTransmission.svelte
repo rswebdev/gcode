@@ -61,6 +61,18 @@
     }
   }
 
+  async function onConnect() {
+    if (serial.isConnected() || !$available) return;
+    try {
+      _setStatus('Connecting…', 'active');
+      await serial.connect();
+      connected.set(true);
+      _setStatus('Connected', 'done');
+    } catch (err) {
+      _setStatus(`Connect failed: ${err?.message ?? err}`);
+    }
+  }
+
   // ---------------------------------------------------------------------------
   // Send to Plotter
   // ---------------------------------------------------------------------------
@@ -323,7 +335,8 @@
       {$connected ? 'Connected' : 'Not connected'}
     </span>
     {#if !$connected && $available}
-      <button class="btn-inline" on:click={onReconnect} title="Reconnect to last used port without showing port picker">Reconnect</button>
+      <button class="btn-inline" on:click={onConnect} title="Connect to plotter (shows port picker)">Connect</button>
+      <button class="btn-inline" on:click={onReconnect} title="Reconnect to last used port without picker">Reconnect</button>
     {/if}
     {#if statusText}
       <span class="status-text {statusClass}">{statusText}</span>
