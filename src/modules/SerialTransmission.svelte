@@ -449,7 +449,7 @@
     </div>
     {#if monitorOpen}
     <div class="monitor-log" bind:this={monitorLog}>
-      {#each $log as entry, i (i)}
+      {#each $log as entry (entry.id)}
         <div class="log-line log-{entry.type}" class:log-ok={entry.type==='rx' && entry.text==='ok'} class:log-err={entry.type==='rx' && (entry.text.startsWith('error') || entry.text.startsWith('ALARM'))}>
           {entry.type === 'tx' ? '> ' : entry.type === 'rx' ? '< ' : '  '}{entry.text}
         </div>

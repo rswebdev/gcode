@@ -17,7 +17,7 @@
   // ── Trace settings ────────────────────────────────────────────────────────
   let threshold  = 128;   // 1–254
   let invert     = false;
-  let simplify   = 1.5;   // RDP tolerance (doubled-pixel units)
+  let simplify   = 4.0;   // RDP tolerance (doubled-pixel units)
   let smooth     = 4;     // Catmull-Rom subdivisions per segment (0/1 = off)
   let minPoints  = 3;     // drop paths shorter than this after simplification
 
