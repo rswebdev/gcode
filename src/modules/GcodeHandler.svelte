@@ -9,7 +9,6 @@
   import { appState } from '../stores/wave.js';
   import * as gcode from '../lib/gcode.js';
   import ImageToGcodeDialog from './ImageToGcodeDialog.svelte';
-
   let previewCanvas;
   let fileInput;
   let zoomLevel  = 1;
@@ -22,18 +21,21 @@
   // A flat sequence of {type:'travel'|'draw', nx1,ny1,nx2,ny2} segments
   // built from activePaths. Each path starts with a travel from the previous
   // pen position, then draw segments for each point in the path.
-  let playSeq   = [];   // built lazily from activePaths
-  let playIdx   = 0;    // segments revealed so far
-  let playing   = false;
-  let playSpeed = 5;    // 1–50; moves per frame = playSpeed * 50
-  let playRaf   = null;
+  let playSeq      = [];   // built lazily from activePaths
+  let playIdx      = 0;    // segments revealed so far
+  let playing      = false;
+  let playSpeed    = 5;    // 1–50; moves per frame = playSpeed * 50
+  let playRaf      = null;
+  let playOptimized = false; // use sorted (optimized) path order in preview
+  let playTravelPct = null;  // % travel reduction from optimizing (null = not computed yet)
 
-  function buildPlaySeq() {
-    const paths = get(activePaths);
-    const seq   = [];
+  function _buildSeqFromPaths(paths) {
+    const seq = [];
     let px = 0, py = 0;
+    let rawTravel = 0;
     for (const path of paths) {
       if (path.length < 1) continue;
+      rawTravel += Math.hypot(path[0].nx - px, path[0].ny - py);
       seq.push({ type: 'travel', nx1: px, ny1: py, nx2: path[0].nx, ny2: path[0].ny });
       for (let i = 1; i < path.length; i++) {
         seq.push({
@@ -45,12 +47,31 @@
       px = path[path.length - 1].nx;
       py = path[path.length - 1].ny;
     }
-    return seq;
+    return { seq, travel: rawTravel };
+  }
+
+  function buildPlaySeq() {
+    const raw  = get(activePaths);
+    if (!raw.length) return;
+
+    if (playOptimized) {
+      const sorted   = gcode.sortPaths(raw);
+      const { seq, travel: optTravel } = _buildSeqFromPaths(sorted);
+      const { travel: rawTravel }      = _buildSeqFromPaths(raw);
+      playSeq = seq;
+      playTravelPct = rawTravel > 0
+        ? Math.round((1 - optTravel / rawTravel) * 100)
+        : null;
+    } else {
+      const { seq } = _buildSeqFromPaths(raw);
+      playSeq = seq;
+      playTravelPct = null;
+    }
   }
 
   function onPlayToggle() {
     if (playing) { pausePlay(); return; }
-    if (!playSeq.length) playSeq = buildPlaySeq();
+    if (!playSeq.length) buildPlaySeq();
     if (playIdx >= playSeq.length) playIdx = 0;
     playing = true;
     schedulePlayFrame();
@@ -79,8 +100,9 @@
     });
   }
 
-  // Invalidate play state when paths change
+  // Invalidate play state when paths or optimized toggle change
   $: $activePaths && resetPlay();
+  $: playOptimized, resetPlay();
 
   const MARGIN = 10;
 
@@ -529,10 +551,17 @@
         Speed
         <input type="range" min="1" max="50" step="1" bind:value={playSpeed}>
       </label>
+      <label class="checkbox-label" style="margin-top:4px">
+        <input type="checkbox" bind:checked={playOptimized}>
+        Optimized order
+      </label>
       {#if playSeq.length > 0}
         <div class="path-info">
           {playIdx.toLocaleString()} / {playSeq.length.toLocaleString()} moves
           · {$activePaths.length} lifts
+          {#if playTravelPct !== null}
+            · <span class="travel-saving">−{playTravelPct}% travel</span>
+          {/if}
         </div>
       {/if}
     </section>
@@ -723,6 +752,10 @@
   .path-info {
     font-size: 11px;
     color: #555;
+  }
+
+  .travel-saving {
+    color: #44bb44;
   }
 
   .section-hint {
