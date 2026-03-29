@@ -81,12 +81,7 @@
       circular:     { noiseType: 'perlin', noiseSpeed: 0.008, noiseFreq: 3,   noiseOct: 3, noisePers: 0.5, ampScale: 1.5, maxFrames: 32  },
       spiral:       { noiseType: 'perlin', noiseSpeed: 0.004, noiseFreq: 2,   noiseOct: 4, noisePers: 0.6, ampScale: 0.8, maxFrames: 96  },
       lissajous:    { noiseType: 'sine',   noiseSpeed: 0.01,  noiseFreq: 1.5, noiseOct: 3, noisePers: 0.5, ampScale: 6,   maxFrames: 32  },
-      phyllotaxis:  { noiseType: 'perlin', noiseSpeed: 0.006, noiseFreq: 2,   noiseOct: 4, noisePers: 0.5, ampScale: 0.8, maxFrames: 128 },
-      tube:         { noiseType: 'perlin', noiseSpeed: 0.005, noiseFreq: 3,   noiseOct: 4, noisePers: 0.5, ampScale: 2,   maxFrames: 48  },
       harmonograph: { noiseType: 'perlin', noiseSpeed: 0.003, noiseFreq: 2,   noiseOct: 4, noisePers: 0.5, ampScale: 2,   maxFrames: 32  },
-      flowfield:    { noiseType: 'perlin', noiseSpeed: 0.005, noiseFreq: 2,   noiseOct: 3, noisePers: 0.5, ampScale: 1,   maxFrames: 48  },
-      epicycles:    { noiseType: 'perlin', noiseSpeed: 0.008, noiseFreq: 3,   noiseOct: 3, noisePers: 0.5, ampScale: 5,   maxFrames: 32  },
-      chladni:      { noiseType: 'perlin', noiseSpeed: 0.004, noiseFreq: 1,   noiseOct: 2, noisePers: 0.5, ampScale: 1,   maxFrames: 32  },
       moire:        { noiseType: 'perlin', noiseSpeed: 0.005, noiseFreq: 2,   noiseOct: 3, noisePers: 0.5, ampScale: 1,   maxFrames: 32  },
       heatmap:      { noiseType: 'perlin', noiseSpeed: 0.005, noiseFreq: 2,   noiseOct: 4, noisePers: 0.5, ampScale: 1,   maxFrames: 48  },
     },
@@ -98,12 +93,7 @@
       circular:     { ampScale: 1.0, maxFrames: 32,  mode: 'frequency' },
       spiral:       { ampScale: 0.5, maxFrames: 64,  mode: 'frequency' },
       lissajous:    { ampScale: 5.0, maxFrames: 16,  mode: 'stereo'    },
-      phyllotaxis:  { ampScale: 0.4, maxFrames: 64,  mode: 'frequency' },
-      tube:         { ampScale: 1.5, maxFrames: 32,  mode: 'frequency' },
       harmonograph: { ampScale: 1.5, maxFrames: 16,  mode: 'frequency' },
-      flowfield:    { ampScale: 1.0, maxFrames: 32,  mode: 'frequency' },
-      epicycles:    { ampScale: 3.0, maxFrames: 16,  mode: 'frequency' },
-      chladni:      { ampScale: 1.0, maxFrames: 16,  mode: 'frequency' },
       moire:        { ampScale: 1.0, maxFrames: 32,  mode: 'time'      },
       heatmap:      { ampScale: 1.0, maxFrames: 32,  mode: 'frequency' },
     },
@@ -558,13 +548,8 @@
           <option value="circular">Circular (concentric)</option>
           <option value="spiral">Spiral</option>
           <option value="lissajous">Lissajous (L×R)</option>
-          <option value="phyllotaxis">Phyllotaxis (golden spiral)</option>
-          <option value="tube">Tube (helix ribs)</option>
           <option value="terrain">Terrain (horizon mask)</option>
           <option value="harmonograph">Harmonograph (pendulum)</option>
-          <option value="flowfield">Flow Field (streamlines)</option>
-          <option value="epicycles">Epicycles (DFT arms)</option>
-          <option value="chladni">Chladni (nodal lines)</option>
           <option value="moire">Moiré (offset rings)</option>
           <option value="landscape">Landscape (Joy Division)</option>
           <option value="quantized">Quantized Noise</option>
