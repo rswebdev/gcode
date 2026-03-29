@@ -23,17 +23,17 @@ test('page title contains G-code', async ({ page }) => {
 
 test('three tabs are visible', async ({ page }) => {
   await page.goto('/');
-  await expect(page.getByRole('button', { name: 'Wave' })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'G-code' })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Serial' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Wave',   exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'G-code', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Serial', exact: true })).toBeVisible();
 });
 
 test('tab switching shows the correct panel', async ({ page }) => {
   await page.goto('/');
   // Wave tab is active by default
-  const waveBtn   = page.getByRole('button', { name: 'Wave' });
-  const gcodeBtn  = page.getByRole('button', { name: 'G-code' });
-  const serialBtn = page.getByRole('button', { name: 'Serial' });
+  const waveBtn   = page.getByRole('button', { name: 'Wave',   exact: true });
+  const gcodeBtn  = page.getByRole('button', { name: 'G-code', exact: true });
+  const serialBtn = page.getByRole('button', { name: 'Serial', exact: true });
 
   await expect(waveBtn).toHaveClass(/active/);
 
@@ -82,17 +82,16 @@ test('help modal closes on backdrop click', async ({ page }) => {
   await expect(dialog).not.toBeVisible();
 });
 
-test('help modal lists all 15 shapes', async ({ page }) => {
+test('help modal lists all 10 shapes', async ({ page }) => {
   await page.goto('/');
   await page.getByRole('button', { name: '?' }).click();
   const modal = page.getByRole('dialog');
   const expectedShapes = [
-    'Linear', 'Circular', 'Spiral', 'Lissajous', 'Phyllotaxis',
-    'Tube', 'Terrain', 'Landscape', 'Harmonograph', 'Flow Field',
-    'Epicycles', 'Chladni', 'Moiré', 'Heatmap', 'Quantized Noise',
+    'Linear', 'Circular', 'Spiral', 'Lissajous',
+    'Terrain', 'Landscape', 'Harmonograph', 'Moiré', 'Heatmap', 'Quantized Noise',
   ];
   for (const name of expectedShapes) {
-    await expect(modal.getByText(name, { exact: false })).toBeVisible();
+    await expect(modal.getByText(name, { exact: true })).toBeVisible();
   }
 });
 
@@ -100,13 +99,12 @@ test('help modal lists all 15 shapes', async ({ page }) => {
 // Shape selector
 // ---------------------------------------------------------------------------
 
-test('shape selector contains all 15 options', async ({ page }) => {
+test('shape selector contains all 10 options', async ({ page }) => {
   await page.goto('/');
   const shapeSelect = page.getByLabel('Shape');
   const expectedValues = [
-    'linear', 'circular', 'spiral', 'lissajous', 'phyllotaxis',
-    'tube', 'terrain', 'harmonograph', 'flowfield', 'epicycles',
-    'chladni', 'moire', 'landscape', 'quantized', 'heatmap',
+    'linear', 'circular', 'spiral', 'lissajous',
+    'terrain', 'harmonograph', 'moire', 'landscape', 'quantized', 'heatmap',
   ];
   for (const value of expectedValues) {
     await expect(shapeSelect.locator(`option[value="${value}"]`)).toHaveCount(1);

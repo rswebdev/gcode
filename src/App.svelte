@@ -76,14 +76,9 @@
       <tr><td>Circular</td><td>Concentric ring per frame.</td></tr>
       <tr><td>Spiral</td><td>Outward spiral of wave rings.</td></tr>
       <tr><td>Lissajous</td><td>Left vs right channel XY plot.</td></tr>
-      <tr><td>Phyllotaxis</td><td>Sunflower / golden-angle spiral.</td></tr>
-      <tr><td>Tube</td><td>Helix with radial wave ribs.</td></tr>
       <tr><td>Terrain</td><td>Horizon-occluded ridges (Joy Division style).</td></tr>
       <tr><td>Landscape</td><td>Terrain with opaque filled ridges and cross-lines.</td></tr>
       <tr><td>Harmonograph</td><td>Two-pendulum parametric curve with damping.</td></tr>
-      <tr><td>Flow Field</td><td>Streamlines steered by frequency spectrum.</td></tr>
-      <tr><td>Epicycles</td><td>DFT arm snapshots per frame.</td></tr>
-      <tr><td>Chladni</td><td>Nodal-line patterns from resonance modes.</td></tr>
       <tr><td>Moiré</td><td>Offset concentric rings producing moiré fringes.</td></tr>
       <tr><td>Heatmap</td><td>Frequency spectrogram grid with cross-hatch density.</td></tr>
       <tr><td>Quantized Noise</td><td>Joy Division ridges with stepped amplitude bands; colored hatch fills in the largest gap regions.</td></tr>

@@ -37,14 +37,9 @@ Fifteen visualization modes, each mapping audio frames to a different 3D geometr
 | **Circular** | One concentric ring per frame; amplitude modulates the radius |
 | **Spiral** | All frames joined into a single continuous outward spiral |
 | **Lissajous** | Left vs right channel XY plot; one curve per frame |
-| **Phyllotaxis** | Golden-angle spiral; sample density follows the sunflower pattern |
-| **Tube** | Helix spine with audio-modulated octagonal rib cross-sections |
 | **Terrain** | Horizon-occluded ridges viewed in perspective (Joy Division with depth) |
 | **Landscape** | Terrain with opaque black fill polygons and perpendicular crest lines |
 | **Harmonograph** | DFT-derived two-pendulum parametric curve with exponential damping |
-| **Flow Field** | Streamlines integrated through an FFT-derived 2D vector field |
-| **Epicycles** | Frozen DFT arm snapshots per frame; Fourier decomposition visualized |
-| **Chladni** | Nodal-line tick marks from resonance mode equations |
 | **Moiré** | Two offset families of concentric rings producing interference fringes |
 | **Heatmap** | Frequency spectrogram grid; amplitude controls circle radius per cell |
 | **Quantized Noise** | Joy Division ridges with amplitudes snapped to 8 discrete bands; the three largest sky-gap regions are filled with colored hatch lines |
@@ -123,17 +118,12 @@ Use the **Speed** slider to control how fast the animation runs. Click **Reset**
 
 The project started as a straightforward linear waveform recorder — capture audio frames, stack them in Z, project through a camera, and write out G-code. The initial four shapes were **Linear**, **Circular**, **Spiral**, and **Lissajous**. The G-code pipeline established the pattern used throughout: record → orbit → project → export, with a clean separation between the Three.js scene and the G-code generator.
 
-### Phase 2: eight new shapes
+### Phase 2: new shapes
 
-The scope expanded significantly. Eight shapes were added to explore different mathematical and perceptual forms:
+The scope expanded to explore different mathematical and perceptual forms. Three shapes from this phase remain:
 
-- **Phyllotaxis** — golden-angle spiral placing samples at sunflower density positions, using `THREE.Points` rather than lines
-- **Tube** — a helix spine with a local coordinate frame at each point, driving 8-vertex perpendicular ribs whose radius varies with amplitude
 - **Terrain** — the first shape to introduce a *horizon masking* algorithm: process frames front-to-back, maintain a per-column maximum screen-Y, and emit only segments that clear the current horizon
 - **Harmonograph** — DFT analysis of the averaged spectrum feeds pendulum frequencies into a damped parametric curve; the curve changes character with the audio content
-- **Flow Field** — the frequency spectrum is used to seed a 20×20 vector field; streamlines are integrated through it
-- **Epicycles** — the top-K DFT components of each frame are visualized as spinning arms frozen at a fixed parametric time
-- **Chladni** — standing wave equations `cos(m·x)cos(n·z) − cos(n·x)cos(m·z)` with mode numbers derived from the dominant FFT bins
 - **Moiré** — two offset families of concentric rings; the offset drifts per frame to produce evolving fringe patterns
 
 The architecture split shapes into *per-frame additive* (append one object) and *rebuild-all* (reconstruct the full scene on each new frame), driven by a `REBUILD_ALL_SHAPES` set.
