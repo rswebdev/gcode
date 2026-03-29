@@ -18,61 +18,125 @@
   // ---------------------------------------------------------------------------
   // Playback
   // ---------------------------------------------------------------------------
-  // A flat sequence of {type:'travel'|'draw', nx1,ny1,nx2,ny2} segments
-  // built from activePaths. Each path starts with a travel from the previous
-  // pen position, then draw segments for each point in the path.
-  let playSeq      = [];   // built lazily from activePaths
-  let playIdx      = 0;    // segments revealed so far
+  // Multi-pass playback: contour paths as pass 0 (cyan), then shade passes.
+  // Each segment has a precomputed lenMm for feed-rate based advancement.
+  let playPasses   = [];     // [{label, color, segs:[{type,nx1,ny1,nx2,ny2,lenMm}]}]
+  let playPassIdx  = 0;      // active pass index
+  let playSegIdx   = 0;      // segment index within active pass
+  let playDistMm   = 0;      // mm consumed into current segment (sub-seg precision)
   let playing      = false;
-  let playSpeed    = 5;    // 1–10; moves per frame = 2^(speed-1) (1, 2, 4 … 512)
+  let playPausedM0 = false;  // waiting for manual resume at M0
   let playRaf      = null;
-  let playOptimized = false; // use sorted (optimized) path order in preview
-  let playTravelPct = null;  // % travel reduction from optimizing (null = not computed yet)
+  let speedMult    = 1;      // playback speed multiplier (×feedRate)
+  let playOptimized = false;
+  let playTravelPct = null;
 
-  function _buildSeqFromPaths(paths) {
-    const seq = [];
-    let px = 0, py = 0;
-    let rawTravel = 0;
+  function _computeNdcToMm() {
+    const s = get(settings);
+    const pw = paper.w, ph = paper.h;
+    const plotW = pw - 2 * MARGIN;
+    const plotH = ph - 2 * MARGIN;
+    const centerX = MARGIN + plotW / 2;
+    const centerY = MARGIN + plotH / 2;
+    const aspect = get(cameraAspect) || 1;
+    const plotScale = +s.importScale || 1;
+    const offsetX = +s.offsetX || 0;
+    const offsetY = +s.offsetY || 0;
+    const { sx: sxR, sy: syR } = ndcScales(aspect, pw, ph);
+    const sx = sxR * plotScale;
+    const sy = syR * plotScale;
+    return {
+      toMmX: (nx) => centerX + nx * sx + offsetX,
+      toMmY: (ny) => centerY + ny * sy + offsetY,
+    };
+  }
+
+  function _pathsToPassSegs(paths, toMmX, toMmY) {
+    const segs = [];
+    let penNx = 0, penNy = 0;
     for (const path of paths) {
       if (path.length < 1) continue;
-      rawTravel += Math.hypot(path[0].nx - px, path[0].ny - py);
-      seq.push({ type: 'travel', nx1: px, ny1: py, nx2: path[0].nx, ny2: path[0].ny });
+      segs.push({
+        type: 'travel',
+        nx1: penNx, ny1: penNy, nx2: path[0].nx, ny2: path[0].ny,
+        lenMm: Math.hypot(toMmX(path[0].nx) - toMmX(penNx), toMmY(path[0].ny) - toMmY(penNy)),
+      });
       for (let i = 1; i < path.length; i++) {
-        seq.push({
+        segs.push({
           type: 'draw',
           nx1: path[i-1].nx, ny1: path[i-1].ny,
           nx2: path[i].nx,   ny2: path[i].ny,
+          lenMm: Math.hypot(toMmX(path[i].nx) - toMmX(path[i-1].nx), toMmY(path[i].ny) - toMmY(path[i-1].ny)),
         });
       }
-      px = path[path.length - 1].nx;
-      py = path[path.length - 1].ny;
+      penNx = path[path.length - 1].nx;
+      penNy = path[path.length - 1].ny;
     }
-    return { seq, travel: rawTravel };
+    return segs;
   }
 
-  function buildPlaySeq() {
-    const raw  = get(activePaths);
+  function _calcTravelMm(paths, toMmX, toMmY) {
+    let penNx = 0, penNy = 0, travel = 0;
+    for (const path of paths) {
+      if (!path.length) continue;
+      travel += Math.hypot(toMmX(path[0].nx) - toMmX(penNx), toMmY(path[0].ny) - toMmY(penNy));
+      penNx = path[path.length - 1].nx;
+      penNy = path[path.length - 1].ny;
+    }
+    return travel;
+  }
+
+  function buildPlayPasses() {
+    const raw = get(activePaths);
     if (!raw.length) return;
 
+    const { toMmX, toMmY } = _computeNdcToMm();
+    const passes = [];
+    const shadePassColors = ['#cc5500', '#e07700', '#f0a020', '#f8cc60'];
+
+    // Pass 0: Contours (optionally sorted)
+    let contourPaths = raw;
     if (playOptimized) {
-      const sorted   = gcode.sortPaths(raw);
-      const { seq, travel: optTravel } = _buildSeqFromPaths(sorted);
-      const { travel: rawTravel }      = _buildSeqFromPaths(raw);
-      playSeq = seq;
-      playTravelPct = rawTravel > 0
-        ? Math.round((1 - optTravel / rawTravel) * 100)
-        : null;
+      const sorted = gcode.sortPaths(raw);
+      const rawTravel = _calcTravelMm(raw, toMmX, toMmY);
+      const optTravel = _calcTravelMm(sorted, toMmX, toMmY);
+      playTravelPct = rawTravel > 0 ? Math.round((1 - optTravel / rawTravel) * 100) : null;
+      contourPaths = sorted;
     } else {
-      const { seq } = _buildSeqFromPaths(raw);
-      playSeq = seq;
       playTravelPct = null;
     }
+    passes.push({ label: 'Contours', color: '#00d4ff', segs: _pathsToPassSegs(contourPaths, toMmX, toMmY) });
+
+    // Shade passes
+    const shading = get(shadingPasses);
+    if (shading?.length) {
+      for (let i = 0; i < shading.length; i++) {
+        passes.push({
+          label: shading[i].label,
+          color: shadePassColors[i] ?? shadePassColors.at(-1),
+          segs: _pathsToPassSegs(shading[i].paths, toMmX, toMmY),
+        });
+      }
+    }
+
+    playPasses = passes;
   }
 
   function onPlayToggle() {
     if (playing) { pausePlay(); return; }
-    if (!playSeq.length) buildPlaySeq();
-    if (playIdx >= playSeq.length) playIdx = 0;
+    if (!playPasses.length) buildPlayPasses();
+    if (playPassIdx >= playPasses.length) { playPassIdx = 0; playSegIdx = 0; playDistMm = 0; }
+    playing = true;
+    playPausedM0 = false;
+    schedulePlayFrame();
+  }
+
+  function onResumeM0() {
+    if (!playPausedM0) return;
+    playPassIdx++;
+    playSegIdx = 0;
+    playDistMm = 0;
+    playPausedM0 = false;
     playing = true;
     schedulePlayFrame();
   }
@@ -84,24 +148,54 @@
 
   function resetPlay() {
     pausePlay();
-    playIdx = 0;
-    playSeq = [];
+    playPassIdx = 0; playSegIdx = 0; playDistMm = 0;
+    playPausedM0 = false;
+    playPasses = [];
     redraw();
   }
 
   function schedulePlayFrame() {
     playRaf = requestAnimationFrame(() => {
       if (!playing) return;
-      const step = Math.pow(2, playSpeed - 1);
-      playIdx = Math.min(playIdx + step, playSeq.length);
+
+      const s = get(settings);
+      const baseFeed  = Math.max(100, +s.feedRate || 3000) * speedMult; // mm/min
+      const rapidRate = baseFeed * 5; // mm/min for travels
+      let   timeBudget = 1 / 60;     // seconds per frame (60 fps assumed)
+
+      const pass = playPasses[playPassIdx];
+      if (!pass) { playing = false; return; }
+
+      while (timeBudget > 1e-9) {
+        if (playSegIdx >= pass.segs.length) {
+          playing = false;
+          if (playPassIdx < playPasses.length - 1) playPausedM0 = true;
+          timeBudget = 0;
+          break;
+        }
+        const seg  = pass.segs[playSegIdx];
+        const rate = (seg.type === 'travel' ? rapidRate : baseFeed) / 60; // mm/s
+        if (rate <= 0 || seg.lenMm <= 0) { playSegIdx++; playDistMm = 0; continue; }
+        const segLeft = seg.lenMm - playDistMm;
+        const timeForSeg = segLeft / rate;
+        if (timeForSeg <= timeBudget) {
+          timeBudget  -= timeForSeg;
+          playSegIdx++;
+          playDistMm = 0;
+        } else {
+          playDistMm += timeBudget * rate;
+          timeBudget = 0;
+        }
+      }
+
       redraw();
-      if (playIdx < playSeq.length) schedulePlayFrame();
-      else playing = false;
+      if (playing) schedulePlayFrame();
     });
   }
 
   // Invalidate play state when paths or optimized toggle change
   $: $activePaths && resetPlay();
+  $: $shadingPasses, resetPlay();
   $: playOptimized, resetPlay();
 
   const MARGIN = 10;
@@ -241,70 +335,97 @@
     ctx.fillText('X0,Y0', ox + 4, oy - 3);
 
     // Draw paths / play trace
-    if (playSeq.length > 0 && playIdx > 0) {
-      // Play mode: render accumulated trace up to playIdx
-      const stop = Math.min(playIdx, playSeq.length);
+    if (playPasses.length > 0 && (playPassIdx > 0 || playSegIdx > 0 || playDistMm > 0 || playPausedM0)) {
+      // Play mode: render completed passes + current pass partial trace
 
-      // Shading passes — static orange background (all passes, not animated)
-      const shadeColors = ['#cc550044', '#e0770055', '#f0a02066', '#f8cc6077'];
-      const shading = get(shadingPasses);
-      if (shading?.length) {
-        ctx.lineWidth = 0.6;
-        ctx.lineJoin  = 'round';
-        ctx.lineCap   = 'round';
-        for (let si = 0; si < shading.length; si++) {
-          ctx.strokeStyle = shadeColors[si] ?? shadeColors[shadeColors.length - 1];
-          for (const path of shading[si].paths) {
-            if (path.length < 2) continue;
+      // Completed passes — draw their pen-down strokes fully
+      for (let pi = 0; pi < playPassIdx; pi++) {
+        const p = playPasses[pi];
+        ctx.strokeStyle = p.color;
+        ctx.lineWidth   = 0.8;
+        ctx.lineJoin    = 'round';
+        ctx.lineCap     = 'round';
+        ctx.beginPath();
+        for (let si = 0; si < p.segs.length; si++) {
+          const seg = p.segs[si];
+          if (seg.type !== 'draw') continue;
+          const x1 = toCanX(ndcToMmX(seg.nx1)), y1 = toCanY(ndcToMmY(seg.ny1));
+          const x2 = toCanX(ndcToMmX(seg.nx2)), y2 = toCanY(ndcToMmY(seg.ny2));
+          if (si === 0 || p.segs[si - 1].type !== 'draw') ctx.moveTo(x1, y1);
+          ctx.lineTo(x2, y2);
+        }
+        ctx.stroke();
+      }
+
+      // Current pass
+      const pass = playPasses[playPassIdx];
+      if (pass) {
+        // Dashed gray travel lines for current pass (up to playSegIdx)
+        ctx.strokeStyle = 'rgba(120,120,120,0.45)';
+        ctx.lineWidth   = 0.6;
+        ctx.setLineDash([3, 4]);
+        for (let si = 0; si < playSegIdx; si++) {
+          const seg = pass.segs[si];
+          if (seg.type !== 'travel') continue;
+          ctx.beginPath();
+          ctx.moveTo(toCanX(ndcToMmX(seg.nx1)), toCanY(ndcToMmY(seg.ny1)));
+          ctx.lineTo(toCanX(ndcToMmX(seg.nx2)), toCanY(ndcToMmY(seg.ny2)));
+          ctx.stroke();
+        }
+        ctx.setLineDash([]);
+
+        // Pen-down draws for current pass (fully drawn segs up to playSegIdx)
+        ctx.strokeStyle = pass.color;
+        ctx.lineWidth   = 0.8;
+        ctx.lineJoin    = 'round';
+        ctx.lineCap     = 'round';
+        ctx.beginPath();
+        for (let si = 0; si < playSegIdx; si++) {
+          const seg = pass.segs[si];
+          if (seg.type !== 'draw') continue;
+          const x1 = toCanX(ndcToMmX(seg.nx1)), y1 = toCanY(ndcToMmY(seg.ny1));
+          const x2 = toCanX(ndcToMmX(seg.nx2)), y2 = toCanY(ndcToMmY(seg.ny2));
+          if (si === 0 || pass.segs[si - 1].type !== 'draw') ctx.moveTo(x1, y1);
+          ctx.lineTo(x2, y2);
+        }
+        ctx.stroke();
+
+        // Partial current segment
+        if (playDistMm > 0 && playSegIdx < pass.segs.length) {
+          const seg = pass.segs[playSegIdx];
+          if (seg.type === 'draw' && seg.lenMm > 0) {
+            const t = Math.min(playDistMm / seg.lenMm, 1);
+            const mx = seg.nx1 + (seg.nx2 - seg.nx1) * t;
+            const my = seg.ny1 + (seg.ny2 - seg.ny1) * t;
+            ctx.strokeStyle = pass.color;
+            ctx.lineWidth   = 0.8;
+            ctx.lineJoin    = 'round';
+            ctx.lineCap     = 'round';
             ctx.beginPath();
-            for (let i = 0; i < path.length; i++) {
-              const { nx, ny } = path[i];
-              if (i === 0) ctx.moveTo(toCanX(ndcToMmX(nx)), toCanY(ndcToMmY(ny)));
-              else         ctx.lineTo(toCanX(ndcToMmX(nx)), toCanY(ndcToMmY(ny)));
-            }
+            ctx.moveTo(toCanX(ndcToMmX(seg.nx1)), toCanY(ndcToMmY(seg.ny1)));
+            ctx.lineTo(toCanX(ndcToMmX(mx)), toCanY(ndcToMmY(my)));
             ctx.stroke();
           }
         }
-      }
 
-      // Pen-up travels — dashed gray
-      ctx.strokeStyle = 'rgba(120,120,120,0.45)';
-      ctx.lineWidth   = 0.6;
-      ctx.setLineDash([3, 4]);
-      for (let i = 0; i < stop; i++) {
-        const s = playSeq[i];
-        if (s.type !== 'travel') continue;
-        ctx.beginPath();
-        ctx.moveTo(toCanX(ndcToMmX(s.nx1)), toCanY(ndcToMmY(s.ny1)));
-        ctx.lineTo(toCanX(ndcToMmX(s.nx2)), toCanY(ndcToMmY(s.ny2)));
-        ctx.stroke();
+        // Pen dot at current position
+        let dotNx, dotNy;
+        if (playDistMm > 0 && playSegIdx < pass.segs.length) {
+          const seg = pass.segs[playSegIdx];
+          const t = seg.lenMm > 0 ? Math.min(playDistMm / seg.lenMm, 1) : 0;
+          dotNx = seg.nx1 + (seg.nx2 - seg.nx1) * t;
+          dotNy = seg.ny1 + (seg.ny2 - seg.ny1) * t;
+        } else if (playSegIdx > 0 && playSegIdx <= pass.segs.length) {
+          const seg = pass.segs[playSegIdx - 1];
+          dotNx = seg.nx2; dotNy = seg.ny2;
+        }
+        if (dotNx !== undefined) {
+          ctx.fillStyle = '#ff4444';
+          ctx.beginPath();
+          ctx.arc(toCanX(ndcToMmX(dotNx)), toCanY(ndcToMmY(dotNy)), 4 / zoomLevel, 0, Math.PI * 2);
+          ctx.fill();
+        }
       }
-      ctx.setLineDash([]);
-
-      // Pen-down draws — cyan
-      ctx.strokeStyle = '#00d4ff';
-      ctx.lineWidth   = 0.8;
-      ctx.lineJoin    = 'round';
-      ctx.lineCap     = 'round';
-      ctx.beginPath();
-      for (let i = 0; i < stop; i++) {
-        const s = playSeq[i];
-        if (s.type !== 'draw') continue;
-        const x1 = toCanX(ndcToMmX(s.nx1)), y1 = toCanY(ndcToMmY(s.ny1));
-        const x2 = toCanX(ndcToMmX(s.nx2)), y2 = toCanY(ndcToMmY(s.ny2));
-        if (i === 0 || playSeq[i-1].type !== 'draw') ctx.moveTo(x1, y1);
-        ctx.lineTo(x2, y2);
-      }
-      ctx.stroke();
-
-      // Current pen position dot
-      const last = playSeq[stop - 1];
-      const dotX = toCanX(ndcToMmX(last.nx2));
-      const dotY = toCanY(ndcToMmY(last.ny2));
-      ctx.fillStyle = '#ff4444';
-      ctx.beginPath();
-      ctx.arc(dotX, dotY, 4 / zoomLevel, 0, Math.PI * 2);
-      ctx.fill();
 
     } else if (showPaths) {
       // Static mode: draw shading passes first (behind contours), then contours
@@ -599,23 +720,34 @@
     <section>
       <h3>Playback</h3>
       <div class="btn-group">
-        <button disabled={!$hasPlottablePaths} on:click={onPlayToggle}>
-          {playing ? 'Pause' : playIdx > 0 ? 'Resume' : 'Play'}
+        <button disabled={!$hasPlottablePaths || playPausedM0} on:click={onPlayToggle}>
+          {playing ? 'Pause' : (playPasses.length && !playPausedM0 && (playPassIdx > 0 || playSegIdx > 0)) ? 'Resume' : 'Play'}
         </button>
-        <button disabled={playIdx === 0} on:click={resetPlay}>Reset</button>
+        <button disabled={playPasses.length === 0 && playPassIdx === 0 && playSegIdx === 0} on:click={resetPlay}>Reset</button>
       </div>
+      {#if playPausedM0}
+        <div class="m0-pause">
+          <span class="m0-label">M0 — swap pen for: <strong>{playPasses[playPassIdx + 1]?.label ?? 'next pass'}</strong></span>
+          <button on:click={onResumeM0}>Continue</button>
+        </div>
+      {/if}
       <label style="margin-top:6px">
         Speed
-        <input type="range" min="1" max="10" step="1" bind:value={playSpeed}>
+        <input type="range" min="0.25" max="8" step="0.25" bind:value={speedMult}>
+        <span class="speed-label">{speedMult}×</span>
       </label>
       <label class="checkbox-label" style="margin-top:4px">
         <input type="checkbox" bind:checked={playOptimized}>
         Optimized order
       </label>
-      {#if playSeq.length > 0}
+      {#if playPasses.length > 0}
         <div class="path-info">
-          {playIdx.toLocaleString()} / {playSeq.length.toLocaleString()} moves
-          · {$activePaths.length} lifts
+          {#if playing || playPausedM0 || playSegIdx > 0}
+            Pass {playPassIdx + 1}/{playPasses.length}: {playPasses[playPassIdx]?.label}
+            · seg {playSegIdx}/{playPasses[playPassIdx]?.segs.length ?? 0}
+          {:else}
+            {$activePaths.length} paths
+          {/if}
           {#if playTravelPct !== null}
             · <span class="travel-saving">−{playTravelPct}% travel</span>
           {/if}
@@ -829,4 +961,19 @@
     font-size: 11px;
     color: #555;
   }
+
+  .m0-pause {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-top: 8px;
+    padding: 8px;
+    background: #1a1000;
+    border: 1px solid #664400;
+    border-radius: 5px;
+    font-size: 12px;
+    color: #cc8800;
+  }
+  .m0-label { color: #cc8800; }
+  .speed-label { color: #888; font-size: 11px; min-width: 28px; }
 </style>
