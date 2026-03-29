@@ -77,7 +77,25 @@ export async function connect() {
   _emit('info', 'Connected — 115200 baud');
 }
 
-// Persistent background loop: the only place _reader.read() is ever called.
+/**
+ * Reconnect to the most-recently used port without showing the picker.
+ * Uses navigator.serial.getPorts() to retrieve previously-granted ports.
+ * Throws if no previously-granted port is available or the port fails to open.
+ */
+export async function reconnect() {
+  const ports = await navigator.serial.getPorts();
+  if (!ports.length) throw new Error('No previously used port found. Use Connect instead.');
+  _port = ports[0];
+  await _port.open({ baudRate: 115200 });
+  _writer = _port.writable.getWriter();
+  _reader = _port.readable.getReader();
+  _rxBuf  = '';
+  _rxNotify = null;
+  _startReaderLoop();
+  _emit('info', 'Reconnected — 115200 baud');
+}
+
+
 // Data arrives here regardless of whether _readUntilOk is currently waiting,
 // so nothing is ever dropped on a timeout.
 async function _startReaderLoop() {
@@ -234,6 +252,17 @@ export function cancelSend() {
     _emit('info', 'Soft reset sent (0x18)');
     _writer.write(new Uint8Array([0x18])).catch(() => {});
   }
+}
+
+/**
+ * Send the GRBL real-time cycle-start / resume character (~, 0x7E).
+ * Used to resume after an M0 (unconditional stop / pen-swap pause).
+ * Does not wait for an 'ok' — it's a real-time command.
+ */
+export function sendCycleStart() {
+  if (!isConnected()) throw new Error('Not connected to plotter');
+  _emit('tx', '~ (cycle start / resume)');
+  _writer.write(new Uint8Array([0x7E])).catch(() => {});
 }
 
 /**
