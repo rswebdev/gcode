@@ -19,6 +19,9 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 
+# Test output
+test-results/
+
 # Editor
 .vscode/settings.json
 .idea/
