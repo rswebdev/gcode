@@ -3,53 +3,144 @@
   import { get } from 'svelte/store';
   import { settings } from '../stores/settings.js';
   import {
-    activePaths, stereoPaths, cameraAspect, exportParams,
+    activePaths, stereoPaths, shadingPasses, cameraAspect, exportParams,
     importedPathCount, hasPlottablePaths,
   } from '../stores/gcode.js';
   import { appState } from '../stores/wave.js';
   import * as gcode from '../lib/gcode.js';
-
+  import ImageToGcodeDialog from './ImageToGcodeDialog.svelte';
   let previewCanvas;
   let fileInput;
   let zoomLevel  = 1;
+  let panX       = 0;
+  let panY       = 0;
+  let _isDragging = false;
+  let _dragLast   = { x: 0, y: 0 };
   let showPaths  = true;
+  let showImageDialog = false;
 
   // ---------------------------------------------------------------------------
   // Playback
   // ---------------------------------------------------------------------------
-  // A flat sequence of {type:'travel'|'draw', nx1,ny1,nx2,ny2} segments
-  // built from activePaths. Each path starts with a travel from the previous
-  // pen position, then draw segments for each point in the path.
-  let playSeq   = [];   // built lazily from activePaths
-  let playIdx   = 0;    // segments revealed so far
-  let playing   = false;
-  let playSpeed = 5;    // 1–50; moves per frame = playSpeed * 50
-  let playRaf   = null;
+  // Multi-pass playback: contour paths as pass 0 (cyan), then shade passes.
+  // Each segment has a precomputed lenMm for feed-rate based advancement.
+  let playPasses   = [];     // [{label, color, segs:[{type,nx1,ny1,nx2,ny2,lenMm}]}]
+  let playPassIdx  = 0;      // active pass index
+  let playSegIdx   = 0;      // segment index within active pass
+  let playDistMm   = 0;      // mm consumed into current segment (sub-seg precision)
+  let playing      = false;
+  let playPausedM0 = false;  // waiting for manual resume at M0
+  let playRaf      = null;
+  let speedMult    = 1;      // playback speed multiplier (×feedRate)
+  let playOptimized = false;
+  let playTravelPct = null;
 
-  function buildPlaySeq() {
-    const paths = get(activePaths);
-    const seq   = [];
-    let px = 0, py = 0;
+  function _computeNdcToMm() {
+    const s = get(settings);
+    const pw = paper.w, ph = paper.h;
+    const plotW = pw - 2 * MARGIN;
+    const plotH = ph - 2 * MARGIN;
+    const centerX = MARGIN + plotW / 2;
+    const centerY = MARGIN + plotH / 2;
+    const aspect = get(cameraAspect) || 1;
+    const plotScale = +s.importScale || 1;
+    const offsetX = +s.offsetX || 0;
+    const offsetY = +s.offsetY || 0;
+    const { sx: sxR, sy: syR } = ndcScales(aspect, pw, ph);
+    const sx = sxR * plotScale;
+    const sy = syR * plotScale;
+    return {
+      toMmX: (nx) => centerX + nx * sx + offsetX,
+      toMmY: (ny) => centerY + ny * sy + offsetY,
+    };
+  }
+
+  function _pathsToPassSegs(paths, toMmX, toMmY) {
+    const segs = [];
+    let penNx = 0, penNy = 0;
     for (const path of paths) {
       if (path.length < 1) continue;
-      seq.push({ type: 'travel', nx1: px, ny1: py, nx2: path[0].nx, ny2: path[0].ny });
+      segs.push({
+        type: 'travel',
+        nx1: penNx, ny1: penNy, nx2: path[0].nx, ny2: path[0].ny,
+        lenMm: Math.hypot(toMmX(path[0].nx) - toMmX(penNx), toMmY(path[0].ny) - toMmY(penNy)),
+      });
       for (let i = 1; i < path.length; i++) {
-        seq.push({
+        segs.push({
           type: 'draw',
           nx1: path[i-1].nx, ny1: path[i-1].ny,
           nx2: path[i].nx,   ny2: path[i].ny,
+          lenMm: Math.hypot(toMmX(path[i].nx) - toMmX(path[i-1].nx), toMmY(path[i].ny) - toMmY(path[i-1].ny)),
         });
       }
-      px = path[path.length - 1].nx;
-      py = path[path.length - 1].ny;
+      penNx = path[path.length - 1].nx;
+      penNy = path[path.length - 1].ny;
     }
-    return seq;
+    return segs;
+  }
+
+  function _calcTravelMm(paths, toMmX, toMmY) {
+    let penNx = 0, penNy = 0, travel = 0;
+    for (const path of paths) {
+      if (!path.length) continue;
+      travel += Math.hypot(toMmX(path[0].nx) - toMmX(penNx), toMmY(path[0].ny) - toMmY(penNy));
+      penNx = path[path.length - 1].nx;
+      penNy = path[path.length - 1].ny;
+    }
+    return travel;
+  }
+
+  function buildPlayPasses() {
+    const raw = get(activePaths);
+    if (!raw.length) return;
+
+    const { toMmX, toMmY } = _computeNdcToMm();
+    const passes = [];
+    const shadePassColors = ['#cc5500', '#e07700', '#f0a020', '#f8cc60'];
+
+    // Pass 0: Contours (optionally sorted)
+    let contourPaths = raw;
+    if (playOptimized) {
+      const sorted = gcode.sortPaths(raw);
+      const rawTravel = _calcTravelMm(raw, toMmX, toMmY);
+      const optTravel = _calcTravelMm(sorted, toMmX, toMmY);
+      playTravelPct = rawTravel > 0 ? Math.round((1 - optTravel / rawTravel) * 100) : null;
+      contourPaths = sorted;
+    } else {
+      playTravelPct = null;
+    }
+    passes.push({ label: 'Contours', color: '#00d4ff', segs: _pathsToPassSegs(contourPaths, toMmX, toMmY) });
+
+    // Shade passes — always sorted to match imageGCode() output
+    const shading = get(shadingPasses);
+    if (shading?.length) {
+      for (let i = 0; i < shading.length; i++) {
+        passes.push({
+          label: shading[i].label,
+          color: shadePassColors[i] ?? shadePassColors.at(-1),
+          segs: _pathsToPassSegs(gcode.sortPaths(shading[i].paths), toMmX, toMmY),
+        });
+      }
+    }
+
+    playPasses = passes;
   }
 
   function onPlayToggle() {
     if (playing) { pausePlay(); return; }
-    if (!playSeq.length) playSeq = buildPlaySeq();
-    if (playIdx >= playSeq.length) playIdx = 0;
+    if (!playPasses.length) buildPlayPasses();
+    if (playPassIdx >= playPasses.length) { playPassIdx = 0; playSegIdx = 0; playDistMm = 0; }
+    playing = true;
+    playPausedM0 = false;
+    schedulePlayFrame();
+  }
+
+  function onResumeM0() {
+    if (!playPausedM0) return;
+    playPassIdx++;
+    playSegIdx = 0;
+    playDistMm = 0;
+    playPausedM0 = false;
     playing = true;
     schedulePlayFrame();
   }
@@ -61,24 +152,55 @@
 
   function resetPlay() {
     pausePlay();
-    playIdx = 0;
-    playSeq = [];
+    playPassIdx = 0; playSegIdx = 0; playDistMm = 0;
+    playPausedM0 = false;
+    playPasses = [];
     redraw();
   }
 
   function schedulePlayFrame() {
     playRaf = requestAnimationFrame(() => {
       if (!playing) return;
-      const step = playSpeed * 50;
-      playIdx = Math.min(playIdx + step, playSeq.length);
+
+      const s = get(settings);
+      const baseFeed  = Math.max(100, +s.feedRate || 3000) * speedMult; // mm/min
+      const rapidRate = baseFeed * 5; // mm/min for travels
+      let   timeBudget = 1 / 60;     // seconds per frame (60 fps assumed)
+
+      const pass = playPasses[playPassIdx];
+      if (!pass) { playing = false; return; }
+
+      while (timeBudget > 1e-9) {
+        if (playSegIdx >= pass.segs.length) {
+          playing = false;
+          if (playPassIdx < playPasses.length - 1) playPausedM0 = true;
+          timeBudget = 0;
+          break;
+        }
+        const seg  = pass.segs[playSegIdx];
+        const rate = (seg.type === 'travel' ? rapidRate : baseFeed) / 60; // mm/s
+        if (rate <= 0 || seg.lenMm <= 0) { playSegIdx++; playDistMm = 0; continue; }
+        const segLeft = seg.lenMm - playDistMm;
+        const timeForSeg = segLeft / rate;
+        if (timeForSeg <= timeBudget) {
+          timeBudget  -= timeForSeg;
+          playSegIdx++;
+          playDistMm = 0;
+        } else {
+          playDistMm += timeBudget * rate;
+          timeBudget = 0;
+        }
+      }
+
       redraw();
-      if (playIdx < playSeq.length) schedulePlayFrame();
-      else playing = false;
+      if (playing) schedulePlayFrame();
     });
   }
 
-  // Invalidate play state when paths change
+  // Invalidate play state when paths or optimized toggle change
   $: $activePaths && resetPlay();
+  $: $shadingPasses, resetPlay();
+  $: playOptimized, resetPlay();
 
   const MARGIN = 10;
 
@@ -163,9 +285,9 @@
     const ndcToMmX = (nx) => centerX + nx * sx + offsetX;
     const ndcToMmY = (ny) => centerY + ny * sy + offsetY;
 
-    // Zoom transform around center
+    // Zoom + pan transform (zoom around canvas center offset by pan)
     ctx.save();
-    ctx.translate(W / 2, H / 2);
+    ctx.translate(W / 2 + panX, H / 2 + panY);
     ctx.scale(zoomLevel, zoomLevel);
     ctx.translate(-W / 2, -H / 2);
 
@@ -217,51 +339,121 @@
     ctx.fillText('X0,Y0', ox + 4, oy - 3);
 
     // Draw paths / play trace
-    if (playSeq.length > 0 && playIdx > 0) {
-      // Play mode: render accumulated trace up to playIdx
-      const stop = Math.min(playIdx, playSeq.length);
+    if (playPasses.length > 0 && (playPassIdx > 0 || playSegIdx > 0 || playDistMm > 0 || playPausedM0)) {
+      // Play mode: render completed passes + current pass partial trace
 
-      // Pen-up travels — dashed gray
-      ctx.strokeStyle = 'rgba(120,120,120,0.45)';
-      ctx.lineWidth   = 0.6;
-      ctx.setLineDash([3, 4]);
-      for (let i = 0; i < stop; i++) {
-        const s = playSeq[i];
-        if (s.type !== 'travel') continue;
+      // Completed passes — draw their pen-down strokes fully
+      for (let pi = 0; pi < playPassIdx; pi++) {
+        const p = playPasses[pi];
+        ctx.strokeStyle = p.color;
+        ctx.lineWidth   = 0.8;
+        ctx.lineJoin    = 'round';
+        ctx.lineCap     = 'round';
         ctx.beginPath();
-        ctx.moveTo(toCanX(ndcToMmX(s.nx1)), toCanY(ndcToMmY(s.ny1)));
-        ctx.lineTo(toCanX(ndcToMmX(s.nx2)), toCanY(ndcToMmY(s.ny2)));
+        for (let si = 0; si < p.segs.length; si++) {
+          const seg = p.segs[si];
+          if (seg.type !== 'draw') continue;
+          const x1 = toCanX(ndcToMmX(seg.nx1)), y1 = toCanY(ndcToMmY(seg.ny1));
+          const x2 = toCanX(ndcToMmX(seg.nx2)), y2 = toCanY(ndcToMmY(seg.ny2));
+          if (si === 0 || p.segs[si - 1].type !== 'draw') ctx.moveTo(x1, y1);
+          ctx.lineTo(x2, y2);
+        }
         ctx.stroke();
       }
-      ctx.setLineDash([]);
 
-      // Pen-down draws — cyan
-      ctx.strokeStyle = '#00d4ff';
-      ctx.lineWidth   = 0.8;
-      ctx.lineJoin    = 'round';
-      ctx.lineCap     = 'round';
-      ctx.beginPath();
-      for (let i = 0; i < stop; i++) {
-        const s = playSeq[i];
-        if (s.type !== 'draw') continue;
-        const x1 = toCanX(ndcToMmX(s.nx1)), y1 = toCanY(ndcToMmY(s.ny1));
-        const x2 = toCanX(ndcToMmX(s.nx2)), y2 = toCanY(ndcToMmY(s.ny2));
-        if (i === 0 || playSeq[i-1].type !== 'draw') ctx.moveTo(x1, y1);
-        ctx.lineTo(x2, y2);
+      // Current pass
+      const pass = playPasses[playPassIdx];
+      if (pass) {
+        // Dashed gray travel lines for current pass (up to playSegIdx)
+        ctx.strokeStyle = 'rgba(120,120,120,0.45)';
+        ctx.lineWidth   = 0.6;
+        ctx.setLineDash([3, 4]);
+        for (let si = 0; si < playSegIdx; si++) {
+          const seg = pass.segs[si];
+          if (seg.type !== 'travel') continue;
+          ctx.beginPath();
+          ctx.moveTo(toCanX(ndcToMmX(seg.nx1)), toCanY(ndcToMmY(seg.ny1)));
+          ctx.lineTo(toCanX(ndcToMmX(seg.nx2)), toCanY(ndcToMmY(seg.ny2)));
+          ctx.stroke();
+        }
+        ctx.setLineDash([]);
+
+        // Pen-down draws for current pass (fully drawn segs up to playSegIdx)
+        ctx.strokeStyle = pass.color;
+        ctx.lineWidth   = 0.8;
+        ctx.lineJoin    = 'round';
+        ctx.lineCap     = 'round';
+        ctx.beginPath();
+        for (let si = 0; si < playSegIdx; si++) {
+          const seg = pass.segs[si];
+          if (seg.type !== 'draw') continue;
+          const x1 = toCanX(ndcToMmX(seg.nx1)), y1 = toCanY(ndcToMmY(seg.ny1));
+          const x2 = toCanX(ndcToMmX(seg.nx2)), y2 = toCanY(ndcToMmY(seg.ny2));
+          if (si === 0 || pass.segs[si - 1].type !== 'draw') ctx.moveTo(x1, y1);
+          ctx.lineTo(x2, y2);
+        }
+        ctx.stroke();
+
+        // Partial current segment
+        if (playDistMm > 0 && playSegIdx < pass.segs.length) {
+          const seg = pass.segs[playSegIdx];
+          if (seg.type === 'draw' && seg.lenMm > 0) {
+            const t = Math.min(playDistMm / seg.lenMm, 1);
+            const mx = seg.nx1 + (seg.nx2 - seg.nx1) * t;
+            const my = seg.ny1 + (seg.ny2 - seg.ny1) * t;
+            ctx.strokeStyle = pass.color;
+            ctx.lineWidth   = 0.8;
+            ctx.lineJoin    = 'round';
+            ctx.lineCap     = 'round';
+            ctx.beginPath();
+            ctx.moveTo(toCanX(ndcToMmX(seg.nx1)), toCanY(ndcToMmY(seg.ny1)));
+            ctx.lineTo(toCanX(ndcToMmX(mx)), toCanY(ndcToMmY(my)));
+            ctx.stroke();
+          }
+        }
+
+        // Pen dot at current position
+        let dotNx, dotNy;
+        if (playDistMm > 0 && playSegIdx < pass.segs.length) {
+          const seg = pass.segs[playSegIdx];
+          const t = seg.lenMm > 0 ? Math.min(playDistMm / seg.lenMm, 1) : 0;
+          dotNx = seg.nx1 + (seg.nx2 - seg.nx1) * t;
+          dotNy = seg.ny1 + (seg.ny2 - seg.ny1) * t;
+        } else if (playSegIdx > 0 && playSegIdx <= pass.segs.length) {
+          const seg = pass.segs[playSegIdx - 1];
+          dotNx = seg.nx2; dotNy = seg.ny2;
+        }
+        if (dotNx !== undefined) {
+          ctx.fillStyle = '#ff4444';
+          ctx.beginPath();
+          ctx.arc(toCanX(ndcToMmX(dotNx)), toCanY(ndcToMmY(dotNy)), 4 / zoomLevel, 0, Math.PI * 2);
+          ctx.fill();
+        }
       }
-      ctx.stroke();
-
-      // Current pen position dot
-      const last = playSeq[stop - 1];
-      const dotX = toCanX(ndcToMmX(last.nx2));
-      const dotY = toCanY(ndcToMmY(last.ny2));
-      ctx.fillStyle = '#ff4444';
-      ctx.beginPath();
-      ctx.arc(dotX, dotY, 4 / zoomLevel, 0, Math.PI * 2);
-      ctx.fill();
 
     } else if (showPaths) {
-      // Static mode: draw all paths at once
+      // Static mode: draw shading passes first (behind contours), then contours
+      const shadeColors = ['#cc550044', '#e0770055', '#f0a02066', '#f8cc6077'];
+      const shading = get(shadingPasses);
+      if (shading?.length) {
+        ctx.lineWidth = 0.6;
+        ctx.lineJoin  = 'round';
+        ctx.lineCap   = 'round';
+        for (let si = 0; si < shading.length; si++) {
+          ctx.strokeStyle = shadeColors[si] ?? shadeColors[shadeColors.length - 1];
+          for (const path of shading[si].paths) {
+            if (path.length < 2) continue;
+            ctx.beginPath();
+            for (let i = 0; i < path.length; i++) {
+              const { nx, ny } = path[i];
+              if (i === 0) ctx.moveTo(toCanX(ndcToMmX(nx)), toCanY(ndcToMmY(ny)));
+              else         ctx.lineTo(toCanX(ndcToMmX(nx)), toCanY(ndcToMmY(ny)));
+            }
+            ctx.stroke();
+          }
+        }
+      }
+
       const paths = get(activePaths);
       ctx.strokeStyle = '#00d4ff';
       ctx.lineWidth   = 0.8;
@@ -298,19 +490,41 @@
   }
 
   // Redraw whenever paths, aspect, or relevant settings change
-  $: previewCanvas && ($activePaths, $cameraAspect, $settings.offsetX, $settings.offsetY, $settings.importScale, showPaths, redraw());
+  $: previewCanvas && ($activePaths, $shadingPasses, $cameraAspect, $settings.offsetX, $settings.offsetY, $settings.importScale, showPaths, redraw());
 
   onMount(() => redraw());
   onDestroy(() => pausePlay());
 
   function onWheel(e) {
     e.preventDefault();
-    const delta = e.deltaY > 0 ? 0.9 : 1.1;
-    zoomLevel = Math.max(0.25, Math.min(8, zoomLevel * delta));
+    const rect = previewCanvas.getBoundingClientRect();
+    const mx = e.clientX - rect.left;
+    const my = e.clientY - rect.top;
+    const W  = rect.width, H = rect.height;
+    const factor  = e.deltaY > 0 ? 0.9 : 1.1;
+    const newZoom = Math.max(0.25, Math.min(8, zoomLevel * factor));
+    // Keep the canvas point under the cursor fixed while zooming
+    panX = panX + (mx - W / 2 - panX) * (1 - newZoom / zoomLevel);
+    panY = panY + (my - H / 2 - panY) * (1 - newZoom / zoomLevel);
+    zoomLevel = newZoom;
     redraw();
   }
 
-  function resetZoom() { zoomLevel = 1; redraw(); }
+  function onCanvasMouseDown(e) {
+    if (e.button !== 0) return;
+    _isDragging = true;
+    _dragLast = { x: e.offsetX, y: e.offsetY };
+  }
+  function onCanvasMouseMove(e) {
+    if (!_isDragging) return;
+    panX += e.offsetX - _dragLast.x;
+    panY += e.offsetY - _dragLast.y;
+    _dragLast = { x: e.offsetX, y: e.offsetY };
+    redraw();
+  }
+  function onCanvasMouseUp() { _isDragging = false; }
+
+  function resetZoom() { zoomLevel = 1; panX = 0; panY = 0; redraw(); }
 
   // ---------------------------------------------------------------------------
   // Import G-code
@@ -345,6 +559,7 @@
       importedPathCount.set(paths.length);
       activePaths.set(ndcPaths);
       stereoPaths.set(null);
+      shadingPasses.set(null);
       cameraAspect.set(plotW / plotH);
       exportParams.set(null);
       statusText  = `Imported ${paths.length} paths (${stats.draws} draw moves)`;
@@ -356,8 +571,7 @@
     }
   }
 
-  function onTestPattern() {
-    const pw = paper.w, ph = paper.h;
+  function onTestPattern() {    const pw = paper.w, ph = paper.h;
     const plotW = pw - 2 * MARGIN;
     const plotH = ph - 2 * MARGIN;
     const cx = MARGIN + plotW / 2;
@@ -412,10 +626,30 @@
     importedPathCount.set(0);
     activePaths.set(paths);
     stereoPaths.set(null);
+    shadingPasses.set(null);
     cameraAspect.set(testAspect);
     exportParams.set(null);
     statusText  = `Test pattern loaded — ${paths.length} paths`;
     statusClass = 'done';
+  }
+
+  // ---------------------------------------------------------------------------
+  // Import Image → G-code dialog
+  // ---------------------------------------------------------------------------
+
+  function onImageApply({ detail }) {
+    const { contourPaths, shadingPasses: passes, aspect } = detail;
+    const allPaths = contourPaths;
+    importedPathCount.set(contourPaths.length);
+    activePaths.set(allPaths);
+    stereoPaths.set(null);
+    shadingPasses.set(passes?.length ? passes : null);
+    cameraAspect.set(aspect);
+    exportParams.set(null);
+    const passInfo = passes?.length ? ` + ${passes.length} shade pass${passes.length !== 1 ? 'es' : ''}` : '';
+    statusText  = `Image imported — ${contourPaths.length} contour${passInfo}`;
+    statusClass = 'done';
+    showImageDialog = false;
   }
 
   // ---------------------------------------------------------------------------
@@ -447,11 +681,20 @@
   function onExport() {
     const paths = get(activePaths);
     if (!paths.length) return;
-    const cfg     = _buildGcodeConfig();
-    const content = gcode.projectedPathsToGCode(paths, cfg);
+    const cfg    = _buildGcodeConfig();
+    const shading = get(shadingPasses);
     const params  = get(exportParams) || {};
-    gcode.downloadGCode(content, gcode.generateFilename(params));
-    statusText = 'G-code exported'; statusClass = 'done';
+    let content, filename;
+    if (shading?.length) {
+      content  = gcode.imageGCode(paths, shading, cfg);
+      filename = gcode.generateFilename(params).replace('.gcode', '-image.gcode');
+      statusText = `G-code exported (${1 + shading.length} passes)`; statusClass = 'done';
+    } else {
+      content  = gcode.projectedPathsToGCode(paths, cfg);
+      filename = gcode.generateFilename(params);
+      statusText = 'G-code exported'; statusClass = 'done';
+    }
+    gcode.downloadGCode(content, filename);
   }
 
   function onExportAnaglyph() {
@@ -469,7 +712,12 @@
   <!-- 2D preview canvas -->
   <div class="preview-area">
     <canvas bind:this={previewCanvas} class="preview-canvas"
-            on:wheel|nonpassive|preventDefault={onWheel}></canvas>
+            class:dragging={_isDragging}
+            on:wheel|nonpassive|preventDefault={onWheel}
+            on:mousedown={onCanvasMouseDown}
+            on:mousemove={onCanvasMouseMove}
+            on:mouseup={onCanvasMouseUp}
+            on:mouseleave={onCanvasMouseUp}></canvas>
     {#if !$hasPlottablePaths}
       <div class="preview-hint">
         Record a wave pattern and click <strong>Pattern → G-code</strong> in the Wave tab,<br>
@@ -487,6 +735,7 @@
       <div class="btn-group">
         <button on:click={onImportClick}>Import G-code</button>
         <input type="file" accept=".gcode,.nc,.ngc,.txt" class="file-input" bind:this={fileInput} on:change={onFileChange}>
+        <button on:click={() => showImageDialog = true}>Import Image</button>
         <button on:click={onTestPattern}>Test Pattern</button>
       </div>
       <div class="btn-group" style="margin-top:6px">
@@ -502,19 +751,37 @@
     <section>
       <h3>Playback</h3>
       <div class="btn-group">
-        <button disabled={!$hasPlottablePaths} on:click={onPlayToggle}>
-          {playing ? 'Pause' : playIdx > 0 ? 'Resume' : 'Play'}
+        <button disabled={!$hasPlottablePaths || playPausedM0} on:click={onPlayToggle}>
+          {playing ? 'Pause' : (playPasses.length && !playPausedM0 && (playPassIdx > 0 || playSegIdx > 0)) ? 'Resume' : 'Play'}
         </button>
-        <button disabled={playIdx === 0} on:click={resetPlay}>Reset</button>
+        <button disabled={playPasses.length === 0 && playPassIdx === 0 && playSegIdx === 0} on:click={resetPlay}>Reset</button>
       </div>
+      {#if playPausedM0}
+        <div class="m0-pause">
+          <span class="m0-label">M0 — swap pen for: <strong>{playPasses[playPassIdx + 1]?.label ?? 'next pass'}</strong></span>
+          <button on:click={onResumeM0}>Continue</button>
+        </div>
+      {/if}
       <label style="margin-top:6px">
         Speed
-        <input type="range" min="1" max="50" step="1" bind:value={playSpeed}>
+        <input type="range" min="0.25" max="8" step="0.25" bind:value={speedMult}>
+        <span class="speed-label">{speedMult}×</span>
       </label>
-      {#if playSeq.length > 0}
+      <label class="checkbox-label" style="margin-top:4px">
+        <input type="checkbox" bind:checked={playOptimized}>
+        Optimized order
+      </label>
+      {#if playPasses.length > 0}
         <div class="path-info">
-          {playIdx.toLocaleString()} / {playSeq.length.toLocaleString()} moves
-          · {$activePaths.length} lifts
+          {#if playing || playPausedM0 || playSegIdx > 0}
+            Pass {playPassIdx + 1}/{playPasses.length}: {playPasses[playPassIdx]?.label}
+            · seg {playSegIdx}/{playPasses[playPassIdx]?.segs.length ?? 0}
+          {:else}
+            {$activePaths.length} paths
+          {/if}
+          {#if playTravelPct !== null}
+            · <span class="travel-saving">−{playTravelPct}% travel</span>
+          {/if}
         </div>
       {/if}
     </section>
@@ -595,6 +862,13 @@
   </aside>
 </div>
 
+{#if showImageDialog}
+  <ImageToGcodeDialog
+    on:apply={onImageApply}
+    on:cancel={() => showImageDialog = false}
+  />
+{/if}
+
 <style>
   .layout {
     display: flex;
@@ -613,8 +887,9 @@
     width: 100%;
     height: 100%;
     display: block;
-    cursor: crosshair;
+    cursor: grab;
   }
+  .preview-canvas.dragging { cursor: grabbing; }
 
   .preview-hint {
     position: absolute;
@@ -700,6 +975,10 @@
     color: #555;
   }
 
+  .travel-saving {
+    color: #44bb44;
+  }
+
   .section-hint {
     font-size: 9px;
     color: #444;
@@ -714,4 +993,19 @@
     font-size: 11px;
     color: #555;
   }
+
+  .m0-pause {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-top: 8px;
+    padding: 8px;
+    background: #1a1000;
+    border: 1px solid #664400;
+    border-radius: 5px;
+    font-size: 12px;
+    color: #cc8800;
+  }
+  .m0-label { color: #cc8800; }
+  .speed-label { color: #888; font-size: 11px; min-width: 28px; }
 </style>

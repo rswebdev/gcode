@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.5.0] - 2026-03-29
+
+### Features
+- **Image → Vektor → G-code**: Neues Dialog-Fenster im G-code-Tab zum Importieren von Rastergrafiken; Konturverfolgung via Marching Squares, RDP-Vereinfachung und Catmull-Rom-Glättung erzeugen saubere Pfade.
+- **Füll- und Schattierungsstrategien**: Vier Füllmuster (Horizontal, Vertikal, Diagonal, Kreuzschraffur, Stipple) mit konfigurierbarem Abstand; bis zu 4 Helligkeitsbänder für mehrstufige Schattierung.
+- **Mehrpass-Schattierung mit M0-Pause**: Jedes Schattierungsband wird als separater G-code-Block mit vorausgehendem `M0`-Befehl ausgegeben, damit der Stift vor jedem Durchgang gewechselt werden kann.
+- **Pfad-Sortierung im Druck**: Konturen und Schattierungspfade werden per Nächster-Nachbar-Sortierung optimiert, um Leerfahrten zu minimieren; optionaler Vorschaumodus zeigt die prozentuale Einsparung.
+- **Mehrstufige Wiedergabe**: Wiedergabe animiert Konturen und Schattierungsdurchgänge nacheinander, stoppt an M0-Stellen und wartet auf manuelles Fortsetzen (Continue-Schaltfläche).
+- **Feeds-basierte Abspielgeschwindigkeit**: Wiedergabegeschwindigkeit richtet sich nach dem konfigurierten Vorschub (mm/min) multipliziert mit einem frei wählbaren Faktor (0,25 ×–8 ×); Leerfahrten laufen mit 5× Vorschub.
+- **Pan & Zoom auf Vorschauflächen**: Beide Vorschaucanvasse (G-code-Viewer und Bildimport-Dialog) unterstützen jetzt Mausrad-Zoom zum Cursor sowie Ziehen zum Verschieben; ⊡-Schaltfläche setzt Zoom und Versatz zurück.
+- **Serielle Steuerung erweitert**: Neue Schaltflächen „Connect", „Reconnect", „Unlock ($X)", „Pen Up + Home" und „Continue (~)" im Serielltab; „Sweep S"-Schaltfläche entfernt.
+
+### Bug Fixes
+- **Seriell-Monitor GC**: Log-Ringpuffer mit O(1)-Append und stabilen DOM-Schlüsseln verhindert vollständiges Neu-Rendern bei jeder neuen Zeile.
+- **Schattierung in Wiedergabe**: Schattierungsdurchgänge werden in der korrekten Reihenfolge animiert statt als statischer Hintergrund dargestellt.
+- **Abspielgeschwindigkeit**: Regler-Bereich von 1–50 (linear) auf 0,25 ×–8 × (multiplikativ) geändert – keine Überempfindlichkeit mehr am oberen Ende.
+
 ## [1.4.0] - 2026-03-29
 
 ### Removed
