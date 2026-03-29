@@ -82,7 +82,7 @@ export function framesToGCode(frames, dataMode, shape, config = {}) {
 // ---------------------------------------------------------------------------
 
 function _monoGCode(lines, frames, opts) {
-  const { feedRate, penDownFeed, penUpZ, penDownZ, ampScale } = opts;
+  const { feedRate, ampScale } = opts;
   const F = frames.length;
 
   for (let fi = 0; fi < F; fi++) {
@@ -107,7 +107,7 @@ function _monoGCode(lines, frames, opts) {
 }
 
 function _stereoGCode(lines, frames, opts) {
-  const { feedRate, penDownFeed, penUpZ, penDownZ, ampScale } = opts;
+  const { feedRate, ampScale } = opts;
   const F = frames.length;
   const bandH = (PLOT_H - 10) / 2;
   const bands = [
@@ -145,7 +145,7 @@ function _stereoGCode(lines, frames, opts) {
 // ---------------------------------------------------------------------------
 
 function _circularGCode(lines, frames, opts) {
-  const { feedRate, penDownFeed, penUpZ, penDownZ, ampScale } = opts;
+  const { feedRate, ampScale } = opts;
   const F = frames.length;
   const ringSpacing = (MAX_R - INNER_R) / Math.max(F, 1);   // mm per ring
 
@@ -183,7 +183,7 @@ function _circularGCode(lines, frames, opts) {
 // ---------------------------------------------------------------------------
 
 function _spiralGCode(lines, frames, opts) {
-  const { feedRate, penDownFeed, penUpZ, penDownZ, ampScale } = opts;
+  const { feedRate, ampScale } = opts;
   const F = frames.length;
   if (F === 0) return;
 
@@ -220,14 +220,13 @@ function _spiralGCode(lines, frames, opts) {
 // ---------------------------------------------------------------------------
 
 function _lissajousGCode(lines, frames, opts) {
-  const { feedRate, penDownFeed, penUpZ, penDownZ, ampScale } = opts;
+  const { feedRate } = opts;
   const F = frames.length;
 
   // Scale: ±1 amplitude → ±halfPlot mm (use the smaller axis).
   const halfW = PLOT_W / 2;
   const halfH = PLOT_H / 2;
-  const halfSize = Math.min(halfW, halfH) * 0.9;   // 90% of half-size, with breathing room
-  const scale = halfSize * ampScale * 0.1;           // empirical: keep within bounds
+  const halfSize = Math.min(halfW, halfH) * 0.9;
 
   for (let fi = 0; fi < F; fi++) {
     const frame = frames[fi];
@@ -759,6 +758,18 @@ function _rowAmpScaleMm(frameCount, configScale) {
  * needed since it's a linear transform of paper coords.
  * Returns a new array; the input paths are not mutated.
  */
+/**
+ * Sorts paths using a greedy nearest-neighbour algorithm to minimise total
+ * pen-up travel.  Each path can also be reversed if that brings the pen
+ * closer to the next start point.
+ *
+ * @param {Array<Array<{nx:number,ny:number}>>} paths
+ * @returns {Array<Array<{nx:number,ny:number}>>}
+ */
+export function sortPaths(paths) {
+  return _sortPaths(paths);
+}
+
 function _sortPaths(paths) {
   if (paths.length < 2) return paths;
 
