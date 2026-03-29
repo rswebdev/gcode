@@ -216,6 +216,47 @@ function rdp(pts, eps) {
 }
 
 // ---------------------------------------------------------------------------
+// Step 5 – Catmull-Rom spline densification
+// ---------------------------------------------------------------------------
+
+/**
+ * Densifies a polyline by interpolating each segment with a Catmull-Rom
+ * spline.  The spline passes through every original point, so the shape is
+ * preserved while sharp corners become smooth curves.
+ *
+ * @param {Array<[number,number]>} pts
+ * @param {number} steps – number of sub-samples per segment (≥ 2 to have effect)
+ * @returns {Array<[number,number]>}
+ */
+function catmullRom(pts, steps) {
+  if (steps < 2 || pts.length < 2) return pts;
+
+  const n      = pts.length;
+  const result = [];
+
+  for (let i = 0; i < n - 1; i++) {
+    const p0 = pts[Math.max(0, i - 1)];
+    const p1 = pts[i];
+    const p2 = pts[i + 1];
+    const p3 = pts[Math.min(n - 1, i + 2)];
+
+    for (let s = 0; s < steps; s++) {
+      const t  = s / steps;
+      const t2 = t * t;
+      const t3 = t2 * t;
+
+      result.push([
+        0.5 * (2*p1[0] + (-p0[0]+p2[0])*t + (2*p0[0]-5*p1[0]+4*p2[0]-p3[0])*t2 + (-p0[0]+3*p1[0]-3*p2[0]+p3[0])*t3),
+        0.5 * (2*p1[1] + (-p0[1]+p2[1])*t + (2*p0[1]-5*p1[1]+4*p2[1]-p3[1])*t2 + (-p0[1]+3*p1[1]-3*p2[1]+p3[1])*t3),
+      ]);
+    }
+  }
+
+  result.push(pts[n - 1]);
+  return result;
+}
+
+// ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
 
@@ -232,6 +273,8 @@ function rdp(pts, eps) {
  * @param {boolean} [options.invert=false]   Treat light pixels as foreground
  * @param {number}  [options.simplify=1.5]   RDP tolerance in doubled pixels
  *                                           (≈ 0.75 real pixels at default)
+ * @param {number}  [options.smooth=4]       Catmull-Rom subdivisions per segment
+ *                                           (0 or 1 = disabled; 2–8 recommended)
  * @param {number}  [options.minPoints=3]    Discard paths shorter than this
  * @returns {Array<Array<{nx:number, ny:number}>>}
  */
@@ -239,6 +282,7 @@ export function traceImage(imageData, {
   threshold = 128,
   invert    = false,
   simplify  = 1.5,
+  smooth    = 4,
   minPoints = 3,
 } = {}) {
   const { width, height } = imageData;
@@ -253,11 +297,14 @@ export function traceImage(imageData, {
     const simplified = rdp(raw, simplify);
     if (simplified.length < minPoints) continue;
 
+    // Optionally densify with smooth Catmull-Rom curves
+    const densified = smooth >= 2 ? catmullRom(simplified, smooth) : simplified;
+
     // Doubled-integer → NDC
     // Real pixel:  px = x2 / 2  (0 … width),   py = y2 / 2  (0 … height)
     // NDC x:  (px / width)  * 2 − 1  =  x2 / width  − 1
     // NDC y:  1 − (py / height) * 2  =  1 − y2 / height   (Y flipped)
-    paths.push(simplified.map(([x2, y2]) => ({
+    paths.push(densified.map(([x2, y2]) => ({
       nx:  x2 / width  - 1,
       ny: -y2 / height + 1,
     })));
