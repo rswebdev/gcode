@@ -146,13 +146,15 @@ export async function installPlugin(code) {
  */
 export function uninstallPlugin(id) {
   if (_reservedIds.has(id)) return;
-  unregisterPlugin(id);
 
   try {
     _save(_load().filter(e => e.id !== id));
   } catch {
     console.warn(`[pluginLoader] Failed to persist uninstall of "${id}" — will re-appear on reload`);
+    return;
   }
+
+  unregisterPlugin(id);
 
   _refreshStores();
 }
