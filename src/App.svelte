@@ -4,8 +4,12 @@
   import GcodeHandler from './modules/GcodeHandler.svelte';
   import SerialTransmission from './modules/SerialTransmission.svelte';
   import * as serial from './lib/serial.js';
+  import { restorePlugins } from './lib/pluginLoader.js';
 
   let showHelp = false;
+
+  // Restore user-installed visualization plugins from localStorage
+  restorePlugins();
 
   // Disconnect serial on page unload
   if (typeof window !== 'undefined') {

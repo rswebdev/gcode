@@ -232,7 +232,7 @@
 <svelte:window on:keydown={onKeyDown} />
 
 <!-- svelte-ignore a11y-click-events-have-key-events -->
-<div class="overlay" on:click={onOverlayClick} role="dialog" aria-modal="true" aria-label="Import image">
+<div class="overlay" on:click={onOverlayClick} role="dialog" aria-modal="true" aria-label="Import image" tabindex="-1">
   <div class="dialog">
 
     <!-- Header -->
@@ -281,11 +281,11 @@
         <section>
           <h3>Tracing</h3>
 
-          <label>
+          <label for="ctrl-threshold">
             Threshold
             <span class="value-badge">{threshold}</span>
           </label>
-          <input type="range" min="1" max="254" step="1"
+          <input id="ctrl-threshold" type="range" min="1" max="254" step="1"
                  bind:value={threshold} class="full-range">
 
           <label class="checkbox-label">
@@ -297,18 +297,18 @@
         <section>
           <h3>Simplify &amp; Smooth</h3>
 
-          <label>
+          <label for="ctrl-simplify">
             Tolerance
             <span class="value-badge">{simplify}</span>
           </label>
-          <input type="range" min="0" max="10" step="0.5"
+          <input id="ctrl-simplify" type="range" min="0" max="10" step="0.5"
                  bind:value={simplify} class="full-range">
 
-          <label>
+          <label for="ctrl-smooth">
             Smoothing
             <span class="value-badge">{smooth === 0 || smooth === 1 ? 'off' : smooth}</span>
           </label>
-          <input type="range" min="0" max="8" step="1"
+          <input id="ctrl-smooth" type="range" min="0" max="8" step="1"
                  bind:value={smooth} class="full-range">
 
           <label>
@@ -331,17 +331,17 @@
             </select>
           </label>
           {#if fill !== 'none'}
-            <label>
+            <label for="ctrl-fill-spacing">
               Spacing
               <span class="value-badge">{fillSpacing}px</span>
             </label>
-            <input type="range" min="2" max="24" step="1"
+            <input id="ctrl-fill-spacing" type="range" min="2" max="24" step="1"
                    bind:value={fillSpacing} class="full-range">
-            <label>
+            <label for="ctrl-shade-levels">
               Shade levels
               <span class="value-badge">{shadeLevels}</span>
             </label>
-            <input type="range" min="1" max="4" step="1"
+            <input id="ctrl-shade-levels" type="range" min="1" max="4" step="1"
                    bind:value={shadeLevels} class="full-range">
             {#if shadeLevels > 1}
               <div class="shade-legend">
