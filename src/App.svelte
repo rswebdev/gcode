@@ -3,6 +3,7 @@
   import WaveRecorder from './modules/WaveRecorder.svelte';
   import GcodeHandler from './modules/GcodeHandler.svelte';
   import SerialTransmission from './modules/SerialTransmission.svelte';
+  import GenArt from './modules/GenArt.svelte';
   import * as serial from './lib/serial.js';
   import { restorePlugins } from './lib/pluginLoader.js';
 
@@ -28,6 +29,9 @@
   <button class="tab-btn" class:active={$activeTab === 'serial'} on:click={() => activeTab.set('serial')}>
     Serial
   </button>
+  <button class="tab-btn" class:active={$activeTab === 'genart'} on:click={() => activeTab.set('genart')}>
+    Gen Art
+  </button>
   <div class="tab-spacer"></div>
   <button class="tab-help" on:click={() => showHelp = true}>?</button>
 </nav>
@@ -41,6 +45,9 @@
 </div>
 <div class="tab-content" class:active={$activeTab === 'serial'}>
   <SerialTransmission />
+</div>
+<div class="tab-content" class:active={$activeTab === 'genart'}>
+  <GenArt />
 </div>
 
 <!-- Help modal -->
