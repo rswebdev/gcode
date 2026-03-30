@@ -75,7 +75,17 @@ const _reservedIds = new Set(getPlugins().map(p => p.id));
 // Internal helpers
 // ---------------------------------------------------------------------------
 
-/** Evaluate plugin source code via Blob URL and return the default export. */
+/**
+ * Evaluate plugin source code via Blob URL and return the default export.
+ *
+ * SECURITY NOTE: Plugin code executes in the main app context with full origin
+ * privileges (localStorage access, network requests, DOM access). This is
+ * intentional for a local-only tool where the user controls what they install.
+ * If this app is ever hosted or shared, replace this with a sandboxed execution
+ * model — e.g. run plugin code inside a CSP-restricted Worker or sandboxed
+ * <iframe>, pass only a serialisable subset of `ctx` via postMessage, and
+ * receive back serialisable geometry data rather than live Three.js objects.
+ */
 async function _importCode(code) {
   const blob = new Blob([code], { type: 'text/javascript' });
   const url  = URL.createObjectURL(blob);
