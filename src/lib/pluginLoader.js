@@ -37,7 +37,12 @@ const STORAGE_KEY = 'gcode-viz-user-plugins';
 
 /** @returns {{ id: string, code: string }[]} */
 function _load() {
-  try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]'); }
+  try {
+    const parsed = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
+    return Array.isArray(parsed)
+      ? parsed.filter(e => e && typeof e.id === 'string' && typeof e.code === 'string')
+      : [];
+  }
   catch { return []; }
 }
 
@@ -63,6 +68,9 @@ export const pluginList = writable(getPlugins());
  * @type {import('svelte/store').Writable<string[]>}
  */
 export const userPluginIds = writable(_load().map(e => e.id));
+
+/** IDs of built-in shapes — user plugins may not shadow or uninstall these. */
+const _reservedIds = new Set(getPlugins().map(p => p.id));
 
 // ---------------------------------------------------------------------------
 // Internal helpers
@@ -102,6 +110,10 @@ function _refreshStores() {
 export async function installPlugin(code) {
   const plugin = await _importCode(code);
 
+  if (_reservedIds.has(plugin.id)) {
+    throw new Error(`installPlugin: "${plugin.id}" conflicts with a built-in shape id`);
+  }
+
   registerPlugin(plugin); // throws if id/label missing
 
   // Upsert: replace any existing entry with the same id, then append
@@ -119,6 +131,7 @@ export async function installPlugin(code) {
  * @param {string} id
  */
 export function uninstallPlugin(id) {
+  if (_reservedIds.has(id)) return;
   unregisterPlugin(id);
 
   const entries = _load().filter(e => e.id !== id);
@@ -134,13 +147,16 @@ export function uninstallPlugin(id) {
  */
 export async function restorePlugins() {
   const entries = _load();
+  const restored = [];
   for (const { id, code } of entries) {
     try {
       const plugin = await _importCode(code);
       registerPlugin(plugin);
+      restored.push({ id: plugin.id, code });
     } catch (err) {
       console.warn(`[pluginLoader] Failed to restore plugin "${id}":`, err);
     }
   }
+  if (restored.length !== entries.length) _save(restored);
   _refreshStores();
 }
