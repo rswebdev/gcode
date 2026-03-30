@@ -66,14 +66,25 @@
 
   $: algorithms = [...BUILTIN, ...$userGenartPlugins];
   $: selected   = algorithms.find(a => a.id === selectedId) ?? algorithms[0];
-  $: params = selected ? _getParams(selectedId, selected) : [];
 
-  function _getParams(id, alg) {
-    if (!paramsByAlg[id]) {
-      paramsByAlg[id] = Object.fromEntries((alg.params ?? []).map(p => [p.id, p.default]));
-      paramsByAlg = paramsByAlg; // trigger reactivity
-    }
-    return alg.params ?? [];
+  // Side-effect reactive block: initialize param storage when the algorithm changes.
+  // This is a statement block (not a derivation), so mutating paramsByAlg here is safe.
+  $: if (selected && !paramsByAlg[selectedId]) {
+    const defaults = {};
+    for (const p of (selected.params ?? [])) defaults[p.id] = p.default;
+    paramsByAlg = { ...paramsByAlg, [selectedId]: defaults };
+  }
+
+  // Pure derivation: param descriptor list for the current algorithm
+  $: params = selected?.params ?? [];
+
+  /** Update a single param value and trigger auto-gen if enabled. */
+  function setParam(id, value) {
+    paramsByAlg = {
+      ...paramsByAlg,
+      [selectedId]: { ...(paramsByAlg[selectedId] ?? {}), [id]: value },
+    };
+    _scheduleAutoGen();
   }
 
   // ---------------------------------------------------------------------------
@@ -150,7 +161,7 @@
       // Yield to browser to show spinner, then compute
       await tick();
       await new Promise(resolve => setTimeout(resolve, 0));
-      const p = { ...(_getParams(selectedId, selected)), ...(paramsByAlg[selectedId] || {}) };
+      const p = paramsByAlg[selectedId] ?? {};
       const paths = selected.generate(p);
       currentPaths = paths;
       _renderPaths(paths);
@@ -163,16 +174,13 @@
     }
   }
 
-  // Auto-generate: debounced re-run on param change
+  // Auto-generate: debounced re-run on param change (called explicitly from setParam)
   let _autoTimer;
   function _scheduleAutoGen() {
     if (!autoGen) return;
     clearTimeout(_autoTimer);
     _autoTimer = setTimeout(generate, 350);
   }
-
-  // Trigger auto-gen when param values change
-  $: if (autoGen && paramsByAlg) _scheduleAutoGen();
 
   // ---------------------------------------------------------------------------
   // Send to G-code
@@ -268,23 +276,23 @@
                 <input
                   type="range"
                   min={param.min} max={param.max} step={param.step ?? 1}
-                  bind:value={paramsByAlg[selectedId][param.id]}
-                  on:input={() => { paramsByAlg = paramsByAlg; _scheduleAutoGen(); }}
+                  value={paramsByAlg[selectedId]?.[param.id] ?? param.default}
+                  on:input={e => setParam(param.id, +e.target.value)}
                 />
-                <span class="param-val">{(+paramsByAlg[selectedId][param.id]).toFixed(
+                <span class="param-val">{(+(paramsByAlg[selectedId]?.[param.id] ?? param.default)).toFixed(
                   (param.step ?? 1) < 0.01 ? 3 : (param.step ?? 1) < 0.1 ? 2 : (param.step ?? 1) < 1 ? 1 : 0
                 )}</span>
               {:else if param.type === 'number'}
                 <input
                   type="number"
                   min={param.min} max={param.max} step={param.step ?? 1}
-                  bind:value={paramsByAlg[selectedId][param.id]}
-                  on:change={() => { paramsByAlg = paramsByAlg; _scheduleAutoGen(); }}
+                  value={paramsByAlg[selectedId]?.[param.id] ?? param.default}
+                  on:change={e => setParam(param.id, +e.target.value)}
                 />
               {:else if param.type === 'select'}
                 <select
-                  bind:value={paramsByAlg[selectedId][param.id]}
-                  on:change={() => { paramsByAlg = paramsByAlg; _scheduleAutoGen(); }}
+                  value={paramsByAlg[selectedId]?.[param.id] ?? param.default}
+                  on:change={e => setParam(param.id, e.target.value)}
                 >
                   {#each (param.options ?? []) as opt (opt.value)}
                     <option value={opt.value}>{opt.label}</option>
@@ -293,8 +301,8 @@
               {:else if param.type === 'toggle'}
                 <input
                   type="checkbox"
-                  bind:checked={paramsByAlg[selectedId][param.id]}
-                  on:change={() => { paramsByAlg = paramsByAlg; _scheduleAutoGen(); }}
+                  checked={paramsByAlg[selectedId]?.[param.id] ?? param.default}
+                  on:change={e => setParam(param.id, e.target.checked)}
                 />
               {/if}
             </div>
