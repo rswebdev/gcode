@@ -47,8 +47,7 @@ function _load() {
 }
 
 function _save(entries) {
-  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(entries)); }
-  catch { /* quota / private-mode — silently ignore */ }
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(entries));
 }
 
 // ---------------------------------------------------------------------------
@@ -117,9 +116,14 @@ export async function installPlugin(code) {
   registerPlugin(plugin); // throws if id/label missing
 
   // Upsert: replace any existing entry with the same id, then append
-  const entries = _load().filter(e => e.id !== plugin.id);
-  entries.push({ id: plugin.id, code });
-  _save(entries);
+  try {
+    const entries = _load().filter(e => e.id !== plugin.id);
+    entries.push({ id: plugin.id, code });
+    _save(entries);
+  } catch {
+    unregisterPlugin(plugin.id);
+    throw new Error(`installPlugin: failed to persist "${plugin.id}" — storage may be full or unavailable`);
+  }
 
   _refreshStores();
   return { id: plugin.id, label: plugin.label };
@@ -134,8 +138,11 @@ export function uninstallPlugin(id) {
   if (_reservedIds.has(id)) return;
   unregisterPlugin(id);
 
-  const entries = _load().filter(e => e.id !== id);
-  _save(entries);
+  try {
+    _save(_load().filter(e => e.id !== id));
+  } catch {
+    console.warn(`[pluginLoader] Failed to persist uninstall of "${id}" — will re-appear on reload`);
+  }
 
   _refreshStores();
 }
@@ -148,15 +155,21 @@ export function uninstallPlugin(id) {
 export async function restorePlugins() {
   const entries = _load();
   const restored = [];
+  let dirty = false;
   for (const { id, code } of entries) {
     try {
       const plugin = await _importCode(code);
+      if (_reservedIds.has(plugin.id)) {
+        throw new Error(`restorePlugins: "${plugin.id}" conflicts with a built-in shape id`);
+      }
       registerPlugin(plugin);
       restored.push({ id: plugin.id, code });
+      dirty ||= plugin.id !== id;
     } catch (err) {
       console.warn(`[pluginLoader] Failed to restore plugin "${id}":`, err);
+      dirty = true;
     }
   }
-  if (restored.length !== entries.length) _save(restored);
+  if (dirty) _save(restored);
   _refreshStores();
 }
