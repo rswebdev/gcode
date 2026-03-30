@@ -11,19 +11,23 @@
   } from '../lib/genartPluginLoader.js';
 
   // Built-in algorithms
-  import * as lsystem  from '../lib/genart/lsystem.js';
+  import * as lsystem   from '../lib/genart/lsystem.js';
   import * as flowField from '../lib/genart/flowField.js';
-  import * as truchet  from '../lib/genart/truchet.js';
-  import * as rdiff    from '../lib/genart/reactionDiffusion.js';
+  import * as truchet   from '../lib/genart/truchet.js';
+  import * as rdiff     from '../lib/genart/reactionDiffusion.js';
+  import * as attractors  from '../lib/genart/attractors.js';
+  import * as phyllotaxis from '../lib/genart/phyllotaxis.js';
+  import * as spaceColon  from '../lib/genart/spaceColon.js';
+  import * as diffGrowth  from '../lib/genart/diffGrowth.js';
 
-  const BUILTIN = [lsystem, flowField, truchet, rdiff];
+  const BUILTIN = [attractors, phyllotaxis, diffGrowth, spaceColon, lsystem, flowField, truchet, rdiff];
 
   // ---------------------------------------------------------------------------
   // State
   // ---------------------------------------------------------------------------
 
   let canvas;
-  let selectedId   = 'lsystem';
+  let selectedId   = 'attractors';
   let paramsByAlg  = {};          // { [algId]: { [paramId]: value } }
   let currentPaths = [];
   let generating   = false;
