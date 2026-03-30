@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.6.1] - 2026-03-30
+
+### Bug Fixes
+- **pluginLoader hardening**: `_load()` validates that localStorage contains an array of well-formed entries; `installPlugin` and `restorePlugins` reject IDs that collide with built-in shapes; `uninstallPlugin` persists the new list before calling `unregisterPlugin` to prevent in-memory/storage drift on save failure; failed restore entries are pruned from storage instead of retried forever.
+- **Security note**: Added comment to `_importCode` documenting that plugin execution is intentionally unsandboxed for local use, with a described migration path for any future hosted deployment.
+
+### Tooling
+- **CodeQL**: Added GitHub Actions CodeQL analysis workflow and updated dependencies.
+
+## [1.6.0] - 2026-03-29
+
+### Bug Fixes
+- **Import Image dialog a11y**: Added `tabindex="-1"` to the dialog overlay and `for`/`id` pairs to range-input labels, resolving all Svelte a11y accessibility warnings.
+
+### Features
+- **Visualization plugin system**: Visualizations are now plugin-based; `visualizer.js` exposes `registerPlugin`/`unregisterPlugin`/`getPlugins` so any shape can be added without modifying core code.
+- **Runtime plugin installation**: Users can paste or load a `.js` file to install custom visualization plugins at runtime; plugins persist across reloads via localStorage and can be removed from the Plugins panel in the Wave Recorder tab.
+
 ## [1.5.0] - 2026-03-29
 
 ### Features
