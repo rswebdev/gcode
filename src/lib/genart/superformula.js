@@ -58,25 +58,28 @@ export function generate(p) {
 
   const rotRad = (rotDeg * Math.PI) / 180;
 
-  // Pre-compute the maximum radius for this preset (for normalisation)
-  // Sample densely to find the true max r
-  let maxR = 0;
   const SURVEY = 2000;
-  for (let i = 0; i <= SURVEY; i++) {
-    const theta = (2 * Math.PI * i) / SURVEY;
-    const r     = _r(theta, m, n1, n2, n3);
-    if (isFinite(r) && r > maxR) maxR = r;
-  }
-  if (maxR < 1e-9) return [];
-
-  const paths = [];
+  const paths  = [];
 
   for (let l = 0; l < L; l++) {
     // Each layer shifts n1 slightly — produces a family of related shapes
-    const n1l    = n1 * (1 + spread * (l - (L - 1) / 2) / Math.max(1, L - 1));
-    const rot    = l * rotRad;
-    // Scale each layer to fit in [-0.95, 0.95] and offset inward per layer
-    const scale  = (0.95 - l * (0.9 / Math.max(1, L))) / maxR;
+    const n1l = n1 * (1 + spread * (l - (L - 1) / 2) / Math.max(1, L - 1));
+    const rot = l * rotRad;
+
+    // Per-layer max-r survey so the scale is always exact for this n1l
+    let layerMaxR = 0;
+    for (let i = 0; i <= SURVEY; i++) {
+      const r = _r((2 * Math.PI * i) / SURVEY, m, n1l, n2, n3);
+      if (isFinite(r) && r > layerMaxR) layerMaxR = r;
+    }
+    if (layerMaxR < 1e-9) continue;
+
+    // Evenly-spaced layers from outermost (0.92) down to a floor (0.28).
+    // The floor prevents inner layers from becoming so small that cusp-tips
+    // land at the canvas centre and produce hub-spokes.
+    const OUTER = 0.92, INNER = 0.28;
+    const targetR = OUTER - l * (OUTER - INNER) / Math.max(1, L - 1);
+    const scale   = targetR / layerMaxR;
 
     const path = [];
     for (let i = 0; i <= steps; i++) {

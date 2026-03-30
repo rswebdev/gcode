@@ -82,7 +82,7 @@ function _stitch(segments) {
 
   const PREC = 1e5; // quantise to 5 decimal places
   function key(p) {
-    return (Math.round(p.nx * PREC) * 131071) ^ Math.round(p.ny * PREC);
+    return `${Math.round(p.nx * PREC)},${Math.round(p.ny * PREC)}`;
   }
 
   // endpoint index: hash → [{segIdx, end: 0|1}]
