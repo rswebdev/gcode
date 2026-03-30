@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.6.1] - 2026-03-30
+
+### Bug Fixes
+- **pluginLoader hardening**: `_load()` validates that localStorage contains an array of well-formed entries; `installPlugin` and `restorePlugins` reject IDs that collide with built-in shapes; `uninstallPlugin` persists the new list before calling `unregisterPlugin` to prevent in-memory/storage drift on save failure; failed restore entries are pruned from storage instead of retried forever.
+- **Security note**: Added comment to `_importCode` documenting that plugin execution is intentionally unsandboxed for local use, with a described migration path for any future hosted deployment.
+
+### Tooling
+- **CodeQL**: Added GitHub Actions CodeQL analysis workflow and updated dependencies.
+
 ## [1.6.0] - 2026-03-29
 
 ### Bug Fixes
