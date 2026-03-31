@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.7.0] - 2026-03-31
+
+### Features
+- **Generative Art tab**: New dedicated tab with 10 built-in math-art and fractal generators — spirograph (hypo/epi-cycloid with ellipse stretch and guide overlay), harmonograph, strange attractors, L-system space filling (Hilbert, Moore, Gosper, Peano), Julia set contours, noise contours, reaction-diffusion, cyclic cellular automata, and superformula.
+- **GenArt plugin system**: Users can install custom JavaScript plugins (via paste or file) that integrate with the same param UI and G-code export pipeline; includes deep param validation on install.
+- **Voronoi Cells example plugin**: Stratified-jitter seeds, Lloyd relaxation, Sutherland-Hodgman clipping, and edge deduplication produce organic foam-cell patterns ready to plot.
+- **Spirograph guide overlay**: Background overlay shows the outer/inner ellipses and pen arm at the current parameter state; guide updates live as sliders change.
+
+### Bug Fixes
+- **Path sort origin**: Nearest-neighbour sort now seeds from NDC (−1, −1) — the machine home corner — so the first pen move is minimised; single-path algorithms also reverse if the tail is closer to home.
+- **Segment deduplication**: `_sortPaths` removes duplicate line segments before sorting, preventing double-traces on Voronoi and other shared-edge outputs.
+- **Spirograph normalisation**: `_normScale` uses `|R−r|+dMax` (instead of `R−r+d`), fixing overflow when `r > R` and correctly bounding multi-layer curves where `_dValues` yields up to `1.3d`.
+- **Stale art on plugin removal**: Removing a plugin now clears the canvas and `currentPaths` immediately instead of leaving the previous artwork visible.
+- **Param defaults merge**: Re-installing a plugin under the same id now merges new param defaults with stored values, adding defaults for new keys and dropping removed ones.
+- **G-code metadata sanitisation**: `_writeParams` strips embedded newlines from label and value strings before writing G-code comments.
+- **Voronoi param clamps**: `margin=0` is now honoured (was coerced to `0.05` by `||`); `count` lower bound raised to `5` to match the declared param minimum.
+- **L_CAP truncation**: `lsExpand()` returns `{result, truncated}`; callers throw a clear error rather than silently plotting a prefix; `CURVE_MAX_ORDER` prevents invalid orders in the UI.
+- **Plugin param validation**: Loader now validates each param's `id` (unique, non-empty), `type` (must be a renderer-supported type), and type-specific required fields.
+
 ## [1.6.1] - 2026-03-30
 
 ### Bug Fixes
