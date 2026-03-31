@@ -9,7 +9,8 @@
     "preview": "vite preview",
     "lint": "eslint src",
     "check": "svelte-check --tsconfig ./jsconfig.json",
-    "test": "playwright test"
+    "test": "playwright test",
+    "generate:docs": "bash scripts/generate-docs.sh"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
