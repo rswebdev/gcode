@@ -71,6 +71,13 @@
   // ---------------------------------------------------------------------------
 
   $: algorithms = [...BUILTIN, ...$userGenartPlugins];
+
+  // If the selected algorithm was removed (e.g. a plugin uninstalled), fall
+  // back to the first available one so selectedId is always a live key.
+  $: if (algorithms.length && !algorithms.some(a => a.id === selectedId)) {
+    selectedId = algorithms[0].id;
+  }
+
   $: selected   = algorithms.find(a => a.id === selectedId) ?? algorithms[0];
 
   // Side-effect reactive block: initialize param storage when the algorithm changes.
