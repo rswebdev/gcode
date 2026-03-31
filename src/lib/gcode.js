@@ -384,7 +384,13 @@ function _djb2(str) {
 function _paramsKey(params) {
   const r = v => (v == null ? '' : parseFloat(Number(v).toFixed(2)));
   const cam = params.camera;
+  // Genart exports set algorithmId + params; wave exports set shape/source/etc.
+  // Include both so filenames are deterministic for either source.
+  const genartKey = params.algorithmId
+    ? `${params.algorithmId}|${JSON.stringify(params.params ?? {})}`
+    : '';
   return [
+    genartKey,
     params.shape, params.source, params.dataMode,
     params.noiseType, params.seed,
     r(params.noiseSpeed), r(params.noiseFreq),
@@ -421,6 +427,13 @@ function _writeParams(lines, params) {
   if (!params) return;
   const p = (label, value) => lines.push(`; ${label.padEnd(16)} ${value}`);
   lines.push('; --- Generation Parameters ---');
+  if (params.algorithmId    != null) p('Algorithm ID:',  params.algorithmId);
+  if (params.algorithmLabel != null) p('Algorithm:',     params.algorithmLabel);
+  if (params.params         != null) {
+    for (const [k, v] of Object.entries(params.params)) {
+      p(`  ${k}:`, v);
+    }
+  }
   if (params.shape     != null) p('Shape:',       params.shape);
   if (params.source    != null) p('Source:',      params.source);
   if (params.dataMode  != null) p('Data mode:',   params.dataMode);

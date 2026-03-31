@@ -204,7 +204,11 @@
     activePaths.set(currentPaths);
     importedPathCount.set(0);
     cameraAspect.set(1); // square canvas
-    exportParams.set({ algorithm: selected?.label ?? selectedId });
+    exportParams.set({
+      algorithmId:    selectedId,
+      algorithmLabel: selected?.label ?? selectedId,
+      params:         { ...(paramsByAlg[selectedId] ?? {}) },
+    });
     activeTab.set('gcode');
   }
 
