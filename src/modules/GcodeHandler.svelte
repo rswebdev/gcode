@@ -57,7 +57,8 @@
 
   function _pathsToPassSegs(paths, toMmX, toMmY) {
     const segs = [];
-    let penNx = 0, penNy = 0;
+    // Initialise pen at machine home ≈ NDC (-1,-1), matching _sortPaths origin.
+    let penNx = -1, penNy = -1;
     for (const path of paths) {
       if (path.length < 1) continue;
       segs.push({
@@ -80,7 +81,8 @@
   }
 
   function _calcTravelMm(paths, toMmX, toMmY) {
-    let penNx = 0, penNy = 0, travel = 0;
+    // Start from machine home ≈ NDC (-1,-1) to match _sortPaths origin.
+    let penNx = -1, penNy = -1, travel = 0;
     for (const path of paths) {
       if (!path.length) continue;
       travel += Math.hypot(toMmX(path[0].nx) - toMmX(penNx), toMmY(path[0].ny) - toMmY(penNy));

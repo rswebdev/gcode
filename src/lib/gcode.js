@@ -384,7 +384,13 @@ function _djb2(str) {
 function _paramsKey(params) {
   const r = v => (v == null ? '' : parseFloat(Number(v).toFixed(2)));
   const cam = params.camera;
+  // Genart exports set algorithmId + params; wave exports set shape/source/etc.
+  // Include both so filenames are deterministic for either source.
+  const genartKey = params.algorithmId
+    ? `${params.algorithmId}|${JSON.stringify(params.params ?? {})}`
+    : '';
   return [
+    genartKey,
     params.shape, params.source, params.dataMode,
     params.noiseType, params.seed,
     r(params.noiseSpeed), r(params.noiseFreq),
@@ -419,8 +425,16 @@ export function generateFilename(params) {
  */
 function _writeParams(lines, params) {
   if (!params) return;
-  const p = (label, value) => lines.push(`; ${label.padEnd(16)} ${value}`);
+  const sanitize = v => String(v).replace(/[\r\n]+/g, ' ').trim();
+  const p = (label, value) => lines.push(`; ${sanitize(label).padEnd(16)} ${sanitize(value)}`);
   lines.push('; --- Generation Parameters ---');
+  if (params.algorithmId    != null) p('Algorithm ID:',  params.algorithmId);
+  if (params.algorithmLabel != null) p('Algorithm:',     params.algorithmLabel);
+  if (params.params         != null) {
+    for (const [k, v] of Object.entries(params.params)) {
+      p(`  ${k}:`, v);
+    }
+  }
   if (params.shape     != null) p('Shape:',       params.shape);
   if (params.source    != null) p('Source:',      params.source);
   if (params.dataMode  != null) p('Data mode:',   params.dataMode);
@@ -850,12 +864,30 @@ export function sortPaths(paths) {
   return _sortPaths(paths);
 }
 
-function _sortPaths(paths) {
-  if (paths.length < 2) return paths;
+// NDC coordinates of machine home (0,0) — sits at the bottom-left corner of
+// the plot area, approximately equal to NDC (-1,-1).
+const HOME_NX = -1;
+const HOME_NY = -1;
 
-  const remaining = paths.slice();
+function _sortPaths(paths) {
+  const deduped = _deduplicatePaths(paths);
+  if (deduped.length === 0) return deduped;
+
+  // Single path: reverse it if the tail is closer to home than the head.
+  if (deduped.length === 1) {
+    const p = deduped[0];
+    if (p.length > 1) {
+      const dHead = (p[0].nx - HOME_NX) ** 2 + (p[0].ny - HOME_NY) ** 2;
+      const dTail = (p[p.length - 1].nx - HOME_NX) ** 2 + (p[p.length - 1].ny - HOME_NY) ** 2;
+      if (dTail < dHead) return [p.slice().reverse()];
+    }
+    return deduped;
+  }
+
+  const remaining = deduped.slice();
   const result    = [];
-  let cx = 0, cy = 0;  // current head position in NDC
+  // Start nearest-neighbour search from machine home ≈ NDC (-1,-1).
+  let cx = HOME_NX, cy = HOME_NY;
 
   while (remaining.length > 0) {
     let bestIdx  = 0;
@@ -882,6 +914,87 @@ function _sortPaths(paths) {
   }
 
   return result;
+}
+
+/**
+ * Remove duplicate line segments from a path set and rechain the survivors.
+ *
+ * Two segments are considered identical when both endpoints round to the same
+ * NDC coordinates at 1e-6 precision (handles tiny floating-point differences
+ * between paths computed independently, e.g. shared Voronoi cell edges).
+ * Deduplication is bidirectional: A→B and B→A are the same segment.
+ *
+ * A fast early-exit pre-scan means non-duplicate inputs (typical waveform
+ * paths) are returned as-is with minimal overhead.
+ */
+function _deduplicatePaths(paths) {
+  const PREC = 1e6;
+  const snap = v => Math.round(v * PREC) / PREC;
+  const pk   = pt  => `${snap(pt.nx)},${snap(pt.ny)}`;
+  const ek   = (k1, k2) => k1 < k2 ? `${k1}|${k2}` : `${k2}|${k1}`;
+
+  // ── Fast pre-scan: bail out immediately if no duplicates exist ────────────
+  const quickSeen = new Set();
+  let hasDupes = false;
+  outer: for (const path of paths) {
+    for (let i = 0; i + 1 < path.length; i++) {
+      const key = ek(pk(path[i]), pk(path[i + 1]));
+      if (quickSeen.has(key)) { hasDupes = true; break outer; }
+      quickSeen.add(key);
+    }
+  }
+  if (!hasDupes) return paths;
+
+  // ── Full pass: collect unique segments ────────────────────────────────────
+  quickSeen.clear();
+  const segs = [];
+  for (const path of paths) {
+    for (let i = 0; i + 1 < path.length; i++) {
+      const key = ek(pk(path[i]), pk(path[i + 1]));
+      if (!quickSeen.has(key)) {
+        quickSeen.add(key);
+        segs.push([path[i], path[i + 1]]);
+      }
+    }
+  }
+
+  // ── Rechain: greedily join adjacent segments into polylines ───────────────
+  // Build adjacency: vertex-key → [{neighbourKey, segIdx, reversed}]
+  const adj = new Map();
+  const addAdj = (kFrom, kTo, idx, rev) => {
+    if (!adj.has(kFrom)) adj.set(kFrom, []);
+    adj.get(kFrom).push({ kTo, idx, rev });
+  };
+  segs.forEach(([p1, p2], i) => {
+    const k1 = pk(p1), k2 = pk(p2);
+    addAdj(k1, k2, i, false);
+    addAdj(k2, k1, i, true);
+  });
+
+  const used   = new Uint8Array(segs.length);
+  const chains = [];
+  for (let start = 0; start < segs.length; start++) {
+    if (used[start]) continue;
+    used[start] = 1;
+    const chain = [segs[start][0], segs[start][1]];
+    let cur = pk(segs[start][1]);
+    for (;;) {
+      const nbrs = adj.get(cur) ?? [];
+      let extended = false;
+      for (const { kTo, idx, rev } of nbrs) {
+        if (!used[idx]) {
+          used[idx] = 1;
+          chain.push(rev ? segs[idx][0] : segs[idx][1]);
+          cur = kTo;
+          extended = true;
+          break;
+        }
+      }
+      if (!extended) break;
+    }
+    chains.push(chain);
+  }
+  return chains;
 }
 
 function _isStereo(data) {
