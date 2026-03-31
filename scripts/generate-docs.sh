@@ -4,12 +4,12 @@
 # The GitHub wiki is a separate git repository at:
 #   https://github.com/<owner>/<repo>.wiki.git
 #
-# This script clones the wiki (if not already cloned), copies all markdown
-# files from docs/ into it, commits, and pushes. README.md is also copied
-# as Home.md (the wiki landing page).
+# PREREQUISITE: Enable the wiki on GitHub first:
+#   Repository Settings → Features → Wikis → check the box,
+#   then create at least one page so the wiki git repo is initialised.
 #
 # Usage: npm run generate:docs
-# Requires: git, gh (GitHub CLI authenticated)
+# Requires: git
 
 set -euo pipefail
 
@@ -18,20 +18,29 @@ WIKI_DIR="$(mktemp -d)"
 REMOTE="$(git -C "$REPO_ROOT" remote get-url origin)"
 WIKI_REMOTE="${REMOTE%.git}.wiki.git"
 
+cleanup() { rm -rf "$WIKI_DIR"; }
+trap cleanup EXIT
+
 echo "📚 Cloning wiki from $WIKI_REMOTE …"
-git clone --quiet "$WIKI_REMOTE" "$WIKI_DIR" 2>/dev/null || {
-  # Wiki may not exist yet — initialise an empty repo
-  git init --quiet "$WIKI_DIR"
-  git -C "$WIKI_DIR" remote add origin "$WIKI_REMOTE"
-}
+if ! git clone --quiet "$WIKI_REMOTE" "$WIKI_DIR" 2>/dev/null; then
+  echo ""
+  echo "❌ Could not clone the GitHub wiki."
+  echo ""
+  echo "   The wiki needs to be enabled and initialised on GitHub before this"
+  echo "   script can push to it. Follow these steps:"
+  echo ""
+  echo "   1. Go to: ${REMOTE%.git}/settings"
+  echo "   2. Scroll to 'Features' and tick the 'Wikis' checkbox."
+  echo "   3. Open the Wiki tab, click 'Create the first page', and save it."
+  echo "   4. Re-run:  npm run generate:docs"
+  echo ""
+  exit 1
+fi
 
 echo "📋 Copying docs …"
-# Landing page
 cp "$REPO_ROOT/README.md" "$WIKI_DIR/Home.md"
-# All docs pages
 for f in "$REPO_ROOT/docs/"*.md; do
-  dest="$(basename "$f")"
-  cp "$f" "$WIKI_DIR/$dest"
+  cp "$f" "$WIKI_DIR/$(basename "$f")"
 done
 
 echo "💾 Committing …"
@@ -44,5 +53,3 @@ else
   git -C "$WIKI_DIR" push origin HEAD
   echo "✅ Wiki updated ($CHANGES file(s) changed)."
 fi
-
-rm -rf "$WIKI_DIR"
