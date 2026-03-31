@@ -866,7 +866,9 @@ export function sortPaths(paths) {
 function _sortPaths(paths) {
   if (paths.length < 2) return paths;
 
-  const remaining = paths.slice();
+  const deduped = _deduplicatePaths(paths);
+
+  const remaining = deduped.slice();
   const result    = [];
   let cx = 0, cy = 0;  // current head position in NDC
 
@@ -895,6 +897,87 @@ function _sortPaths(paths) {
   }
 
   return result;
+}
+
+/**
+ * Remove duplicate line segments from a path set and rechain the survivors.
+ *
+ * Two segments are considered identical when both endpoints round to the same
+ * NDC coordinates at 1e-6 precision (handles tiny floating-point differences
+ * between paths computed independently, e.g. shared Voronoi cell edges).
+ * Deduplication is bidirectional: A→B and B→A are the same segment.
+ *
+ * A fast early-exit pre-scan means non-duplicate inputs (typical waveform
+ * paths) are returned as-is with minimal overhead.
+ */
+function _deduplicatePaths(paths) {
+  const PREC = 1e6;
+  const snap = v => Math.round(v * PREC) / PREC;
+  const pk   = pt  => `${snap(pt.nx)},${snap(pt.ny)}`;
+  const ek   = (k1, k2) => k1 < k2 ? `${k1}|${k2}` : `${k2}|${k1}`;
+
+  // ── Fast pre-scan: bail out immediately if no duplicates exist ────────────
+  const quickSeen = new Set();
+  let hasDupes = false;
+  outer: for (const path of paths) {
+    for (let i = 0; i + 1 < path.length; i++) {
+      const key = ek(pk(path[i]), pk(path[i + 1]));
+      if (quickSeen.has(key)) { hasDupes = true; break outer; }
+      quickSeen.add(key);
+    }
+  }
+  if (!hasDupes) return paths;
+
+  // ── Full pass: collect unique segments ────────────────────────────────────
+  quickSeen.clear();
+  const segs = [];
+  for (const path of paths) {
+    for (let i = 0; i + 1 < path.length; i++) {
+      const key = ek(pk(path[i]), pk(path[i + 1]));
+      if (!quickSeen.has(key)) {
+        quickSeen.add(key);
+        segs.push([path[i], path[i + 1]]);
+      }
+    }
+  }
+
+  // ── Rechain: greedily join adjacent segments into polylines ───────────────
+  // Build adjacency: vertex-key → [{neighbourKey, segIdx, reversed}]
+  const adj = new Map();
+  const addAdj = (kFrom, kTo, idx, rev) => {
+    if (!adj.has(kFrom)) adj.set(kFrom, []);
+    adj.get(kFrom).push({ kTo, idx, rev });
+  };
+  segs.forEach(([p1, p2], i) => {
+    const k1 = pk(p1), k2 = pk(p2);
+    addAdj(k1, k2, i, false);
+    addAdj(k2, k1, i, true);
+  });
+
+  const used   = new Uint8Array(segs.length);
+  const chains = [];
+  for (let start = 0; start < segs.length; start++) {
+    if (used[start]) continue;
+    used[start] = 1;
+    const chain = [segs[start][0], segs[start][1]];
+    let cur = pk(segs[start][1]);
+    for (;;) {
+      const nbrs = adj.get(cur) ?? [];
+      let extended = false;
+      for (const { kTo, idx, rev } of nbrs) {
+        if (!used[idx]) {
+          used[idx] = 1;
+          chain.push(rev ? segs[idx][0] : segs[idx][1]);
+          cur = kTo;
+          extended = true;
+          break;
+        }
+      }
+      if (!extended) break;
+    }
+    chains.push(chain);
+  }
+  return chains;
 }
 
 function _isStereo(data) {
