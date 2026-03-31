@@ -50,18 +50,35 @@ export function marchingSquares(field, N, thr) {
         ndc(x,                 y + 1 - t(v3, v0)), // edge 3: left (y decreases)
       ];
 
+      const center = (v0 + v1 + v2 + v3) * 0.25;
       // Canonical edge-pair table (which two edges the isoline crosses for each case)
       switch (idx) {
         case  1: segments.push([e[3], e[0]]); break;
         case  2: segments.push([e[0], e[1]]); break;
         case  3: segments.push([e[3], e[1]]); break;
         case  4: segments.push([e[1], e[2]]); break;
-        case  5: segments.push([e[3], e[0]]); segments.push([e[1], e[2]]); break; // saddle
+        case  5:
+          if (center > thr) {
+            segments.push([e[0], e[1]]);
+            segments.push([e[2], e[3]]);
+          } else {
+            segments.push([e[3], e[0]]);
+            segments.push([e[1], e[2]]);
+          }
+          break;
         case  6: segments.push([e[0], e[2]]); break;
         case  7: segments.push([e[3], e[2]]); break;
         case  8: segments.push([e[2], e[3]]); break;
         case  9: segments.push([e[2], e[0]]); break;
-        case 10: segments.push([e[0], e[3]]); segments.push([e[2], e[1]]); break; // saddle
+        case 10:
+          if (center > thr) {
+            segments.push([e[0], e[3]]);
+            segments.push([e[2], e[1]]);
+          } else {
+            segments.push([e[0], e[1]]);
+            segments.push([e[2], e[3]]);
+          }
+          break;
         case 11: segments.push([e[2], e[1]]); break;
         case 12: segments.push([e[1], e[3]]); break;
         case 13: segments.push([e[1], e[0]]); break;
