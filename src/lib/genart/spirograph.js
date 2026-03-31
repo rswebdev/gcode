@@ -88,11 +88,13 @@ function _dValues(d, layers) {
 
 /**
  * Analytically exact normalisation scale after stretching.
- * For both hypo and epi the maximum stretched magnitude is rawMax × max(sx, sy),
- * where rawMax = R−r+d (hypo) or R+r+d (epi).
+ * rawMax is the maximum pen radius before stretching:
+ *   hypo → |R − r| + dMax  (abs handles r > R / extended cycloids)
+ *   epi  → R + r + dMax
+ * dMax is the largest d value across all layers (from _dValues).
  */
-function _normScale(R, r, d, type, sx, sy) {
-  const rawMax = type === 'hypo' ? (R - r + d) : (R + r + d);
+function _normScale(R, r, dMax, type, sx, sy) {
+  const rawMax = type === 'hypo' ? Math.abs(R - r) + dMax : (R + r + dMax);
   const stretchedMax = rawMax * Math.max(sx, sy);
   return stretchedMax < 1e-9 ? 1 : 0.95 / stretchedMax;
 }
@@ -121,7 +123,8 @@ export function generate(p) {
 
   const ptFn  = _makePointFn(R, r, type);
   const dvs   = _dValues(d, layers);
-  const scale = _normScale(R, r, d, type, sx, sy);
+  const dMax  = Math.max(...dvs);
+  const scale = _normScale(R, r, dMax, type, sx, sy);
 
   return dvs.map(dVal => {
     const path = [];
@@ -172,8 +175,10 @@ export function guide(p) {
   const sy = isFinite(+p.stretchY) ? +p.stretchY : 1;
   const layers = Math.max(1, p.layers | 0);
 
-  const scale = _normScale(R, r, d, type, sx, sy);
-  const ptFn  = _makePointFn(R, r, type);
+  const dvs    = _dValues(d, layers);
+  const dMax   = Math.max(...dvs);
+  const scale  = _normScale(R, r, dMax, type, sx, sy);
+  const ptFn   = _makePointFn(R, r, type);
 
   // Inner circle centre at t = 0 in spirograph coordinates
   const icRaw = type === 'hypo' ? (R - r) : (R + r);
@@ -192,7 +197,7 @@ export function guide(p) {
   paths.push(..._cross(icX, icY, 0.025));
 
   // Pen arm + pen dot for each layer
-  for (const dVal of _dValues(d, layers)) {
+  for (const dVal of dvs) {
     const { x: penRawX, y: penRawY } = ptFn(0, dVal);
     const penX = penRawX * sx * scale;
     const penY = penRawY * sy * scale;

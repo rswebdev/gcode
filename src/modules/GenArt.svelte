@@ -73,19 +73,33 @@
   $: algorithms = [...BUILTIN, ...$userGenartPlugins];
 
   // If the selected algorithm was removed (e.g. a plugin uninstalled), fall
-  // back to the first available one so selectedId is always a live key.
+  // back to the first available one so selectedId is always a live key,
+  // and discard stale paths from the removed algorithm.
   $: if (algorithms.length && !algorithms.some(a => a.id === selectedId)) {
-    selectedId = algorithms[0].id;
+    selectedId   = algorithms[0].id;
+    currentPaths = [];
+    tick().then(() => _renderPaths([]));
   }
 
   $: selected   = algorithms.find(a => a.id === selectedId) ?? algorithms[0];
 
-  // Side-effect reactive block: initialize param storage when the algorithm changes.
-  // This is a statement block (not a derivation), so mutating paramsByAlg here is safe.
-  $: if (selected && !paramsByAlg[selectedId]) {
-    const defaults = {};
-    for (const p of (selected.params ?? [])) defaults[p.id] = p.default;
-    paramsByAlg = { ...paramsByAlg, [selectedId]: defaults };
+  // Param storage: always merge defaults with stored values so that
+  // (a) new installations start with defaults, and
+  // (b) re-installing the same id with new/renamed params picks up their defaults
+  //     while retaining values for params that are still present.
+  $: if (selected) {
+    const defaults = Object.fromEntries((selected.params ?? []).map(p => [p.id, p.default]));
+    const stored   = paramsByAlg[selectedId] ?? {};
+    const validIds = new Set(Object.keys(defaults));
+    // Only update when a new key is missing or a stale key is present.
+    const needsUpdate = Object.keys(defaults).some(k => !(k in stored))
+                     || Object.keys(stored).some(k => !validIds.has(k));
+    if (needsUpdate) {
+      const merged = Object.fromEntries(
+        Object.keys(defaults).map(k => [k, k in stored ? stored[k] : defaults[k]])
+      );
+      paramsByAlg = { ...paramsByAlg, [selectedId]: merged };
+    }
   }
 
   // Render guide immediately when switching to an algorithm that has one.

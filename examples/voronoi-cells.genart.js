@@ -184,9 +184,9 @@ export default {
   ],
 
   generate(p) {
-    const count  = Math.max(3,   Math.min(120,  p.count  | 0));
+    const count  = Math.max(5,   Math.min(120,  p.count  | 0));
     const relax  = Math.max(0,   Math.min(12,   p.relax  | 0));
-    const margin = Math.max(0,   Math.min(0.3, +p.margin || 0.05));
+    const margin = isFinite(+p.margin) ? Math.max(0, Math.min(0.3, +p.margin)) : 0.05;
     const rng    = mulberry32(p.seed | 0);
 
     const x0 = -(1 - margin), y0 = -(1 - margin);

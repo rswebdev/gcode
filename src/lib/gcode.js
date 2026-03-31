@@ -425,7 +425,8 @@ export function generateFilename(params) {
  */
 function _writeParams(lines, params) {
   if (!params) return;
-  const p = (label, value) => lines.push(`; ${label.padEnd(16)} ${value}`);
+  const sanitize = v => String(v).replace(/[\r\n]+/g, ' ').trim();
+  const p = (label, value) => lines.push(`; ${sanitize(label).padEnd(16)} ${sanitize(value)}`);
   lines.push('; --- Generation Parameters ---');
   if (params.algorithmId    != null) p('Algorithm ID:',  params.algorithmId);
   if (params.algorithmLabel != null) p('Algorithm:',     params.algorithmLabel);
