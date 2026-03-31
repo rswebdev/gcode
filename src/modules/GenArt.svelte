@@ -88,6 +88,9 @@
     paramsByAlg = { ...paramsByAlg, [selectedId]: defaults };
   }
 
+  // Render guide immediately when switching to an algorithm that has one.
+  $: if (selected?.guide) tick().then(() => _renderPaths(currentPaths));
+
   // Pure derivation: param descriptor list for the current algorithm
   $: params = selected?.params ?? [];
 
@@ -105,6 +108,11 @@
       ...paramsByAlg,
       [selectedId]: { ...(paramsByAlg[selectedId] ?? {}), ...updates },
     };
+
+    // Re-render guide immediately so it reflects the latest param state
+    // even when auto-generate is off.
+    if (selected?.guide) _renderPaths(currentPaths);
+
     _scheduleAutoGen();
   }
 
@@ -140,34 +148,48 @@
     ctx.fillStyle = '#0a0a0a';
     ctx.fillRect(0, 0, W, H);
 
-    if (!paths || paths.length === 0) return;
+    const hasGuide = !!selected?.guide;
+    const hasPaths = paths?.length > 0;
+    if (!hasGuide && !hasPaths) return;
 
     // NDC [-1,+1] → canvas pixels, preserving square aspect within canvas
     const size = Math.min(W, H) * 0.9;
     const ox = W / 2, oy = H / 2;
     function toCanvas(nx, ny) {
-      return {
-        cx:  ox + nx * (size / 2),
-        cy:  oy - ny * (size / 2), // Y flip: NDC +1 is top
-      };
+      return { cx: ox + nx * (size / 2), cy: oy - ny * (size / 2) };
     }
 
-    ctx.strokeStyle = '#00d4ff';
-    ctx.lineWidth   = 1;
-    ctx.globalAlpha = 0.85;
-    ctx.beginPath();
-
-    for (const path of paths) {
-      if (path.length < 2) continue;
-      const { cx, cy } = toCanvas(path[0].nx, path[0].ny);
-      ctx.moveTo(cx, cy);
-      for (let i = 1; i < path.length; i++) {
-        const { cx: px, cy: py } = toCanvas(path[i].nx, path[i].ny);
-        ctx.lineTo(px, py);
+    function drawPaths(ps, color, alpha, dash = []) {
+      if (!ps?.length) return;
+      ctx.strokeStyle = color;
+      ctx.lineWidth   = 1;
+      ctx.globalAlpha = alpha;
+      ctx.setLineDash(dash);
+      ctx.beginPath();
+      for (const path of ps) {
+        if (path.length < 2) continue;
+        const { cx, cy } = toCanvas(path[0].nx, path[0].ny);
+        ctx.moveTo(cx, cy);
+        for (let i = 1; i < path.length; i++) {
+          const { cx: px, cy: py } = toCanvas(path[i].nx, path[i].ny);
+          ctx.lineTo(px, py);
+        }
       }
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.globalAlpha = 1;
     }
-    ctx.stroke();
-    ctx.globalAlpha = 1;
+
+    // Guide layer: outer track, inner rolling ellipse, pen arm(s) & dot(s)
+    if (hasGuide) {
+      try {
+        const guidePaths = selected.guide(paramsByAlg[selectedId] ?? {});
+        drawPaths(guidePaths, '#3a6080', 0.55, [5, 4]);
+      } catch { /* guide errors are non-fatal */ }
+    }
+
+    // Main generated paths
+    drawPaths(paths, '#00d4ff', 0.85);
   }
 
   // ---------------------------------------------------------------------------

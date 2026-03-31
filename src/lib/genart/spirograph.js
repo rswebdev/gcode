@@ -10,7 +10,8 @@
  *                 y = (R+r)·sin(t) − d·sin((R+r)/r · t)
  *
  * Multiple concentric layers vary the pen distance d to build up
- * rich overlapping patterns.
+ * rich overlapping patterns.  The stretchX/stretchY params distort the
+ * circular rolling tracks into ellipses.
  */
 
 export const id    = 'spirograph';
@@ -44,11 +45,13 @@ export const params = [
       { value: 'custom',   label: 'Custom'    },
     ],
   },
-  { id: 'R',      label: 'Outer radius (R)',  type: 'range', min: 2,   max: 20,   step: 1,   default: 5    },
-  { id: 'r',      label: 'Inner radius (r)',  type: 'range', min: 1,   max: 10,   step: 1,   default: 3    },
-  { id: 'd',      label: 'Pen distance (d)',  type: 'range', min: 0.5, max: 15,   step: 0.5, default: 5    },
-  { id: 'layers', label: 'Layers',            type: 'range', min: 1,   max: 8,    step: 1,   default: 3    },
-  { id: 'steps',  label: 'Steps/revolution',  type: 'range', min: 200, max: 4000, step: 100, default: 1000 },
+  { id: 'R',       label: 'Outer radius (R)',  type: 'range', min: 2,   max: 20,   step: 1,    default: 5    },
+  { id: 'r',       label: 'Inner radius (r)',  type: 'range', min: 1,   max: 10,   step: 1,    default: 3    },
+  { id: 'd',       label: 'Pen distance (d)',  type: 'range', min: 0.5, max: 15,   step: 0.5,  default: 5    },
+  { id: 'layers',  label: 'Layers',            type: 'range', min: 1,   max: 8,    step: 1,    default: 3    },
+  { id: 'steps',   label: 'Steps/revolution',  type: 'range', min: 200, max: 4000, step: 100,  default: 1000 },
+  { id: 'stretchX', label: 'X stretch',        type: 'range', min: 0.3, max: 2.0,  step: 0.05, default: 1.0  },
+  { id: 'stretchY', label: 'Y stretch',        type: 'range', min: 0.3, max: 2.0,  step: 0.05, default: 1.0  },
 ];
 
 function gcd(a, b) {
@@ -58,6 +61,42 @@ function gcd(a, b) {
   return a;
 }
 
+/** Returns a point-function (t, d) → {x, y} for the chosen curve type. */
+function _makePointFn(R, r, type) {
+  if (type === 'hypo') {
+    const k = (R - r) / r;
+    return (t, d) => ({
+      x: (R - r) * Math.cos(t) + d * Math.cos(k * t),
+      y: (R - r) * Math.sin(t) - d * Math.sin(k * t),
+    });
+  }
+  const k = (R + r) / r;
+  return (t, d) => ({
+    x: (R + r) * Math.cos(t) - d * Math.cos(k * t),
+    y: (R + r) * Math.sin(t) - d * Math.sin(k * t),
+  });
+}
+
+/**
+ * Resolve the d-values for each layer.
+ * Exported so guide() can use the same distribution as generate().
+ */
+function _dValues(d, layers) {
+  if (layers === 1) return [d];
+  return Array.from({ length: layers }, (_, i) => d * (0.7 + 0.6 * i / (layers - 1)));
+}
+
+/**
+ * Analytically exact normalisation scale after stretching.
+ * For both hypo and epi the maximum stretched magnitude is rawMax × max(sx, sy),
+ * where rawMax = R−r+d (hypo) or R+r+d (epi).
+ */
+function _normScale(R, r, d, type, sx, sy) {
+  const rawMax = type === 'hypo' ? (R - r + d) : (R + r + d);
+  const stretchedMax = rawMax * Math.max(sx, sy);
+  return stretchedMax < 1e-9 ? 1 : 0.95 / stretchedMax;
+}
+
 export function generate(p) {
   const type = p.type === 'epi' ? 'epi' : 'hypo';
 
@@ -65,7 +104,9 @@ export function generate(p) {
   // setParam hook, so generate() never needs to override them directly.
   let R = +p.R || 5;
   let r = +p.r || 3;
-  let d = +p.d || 5;
+  const d  = +p.d  || 5;
+  const sx = isFinite(+p.stretchX) ? +p.stretchX : 1;
+  const sy = isFinite(+p.stretchY) ? +p.stretchY : 1;
 
   R = Math.max(2, R);
   r = Math.max(1, r);
@@ -78,55 +119,90 @@ export function generate(p) {
   const totalSteps = stepsPerRev * revs;
   const tMax = 2 * Math.PI * revs;
 
-  function point(t, dVal) {
-    if (type === 'hypo') {
-      const k = (R - r) / r;
-      return {
-        nx: (R - r) * Math.cos(t) + dVal * Math.cos(k * t),
-        ny: (R - r) * Math.sin(t) - dVal * Math.sin(k * t),
-      };
-    } else {
-      const k = (R + r) / r;
-      return {
-        nx: (R + r) * Math.cos(t) - dVal * Math.cos(k * t),
-        ny: (R + r) * Math.sin(t) - dVal * Math.sin(k * t),
-      };
-    }
-  }
+  const ptFn  = _makePointFn(R, r, type);
+  const dvs   = _dValues(d, layers);
+  const scale = _normScale(R, r, d, type, sx, sy);
 
-  // Build layer d values
-  const dValues = [];
-  if (layers === 1) {
-    dValues.push(d);
-  } else {
-    for (let i = 0; i < layers; i++) {
-      dValues.push(d * (0.7 + 0.6 * i / (layers - 1)));
-    }
-  }
-
-  // Generate raw paths
-  const rawPaths = dValues.map(dVal => {
+  return dvs.map(dVal => {
     const path = [];
     for (let i = 0; i <= totalSteps; i++) {
       const t = (tMax * i) / totalSteps;
-      path.push(point(t, dVal));
+      const { x, y } = ptFn(t, dVal);
+      path.push({ nx: x * sx * scale, ny: y * sy * scale });
     }
     return path;
   });
+}
 
-  // Find max radius for uniform scaling
-  let maxR = 0;
-  for (const path of rawPaths) {
-    for (const pt of path) {
-      const r2 = Math.sqrt(pt.nx * pt.nx + pt.ny * pt.ny);
-      if (r2 > maxR) maxR = r2;
-    }
+// ─── Guide (background helper overlay) ────────────────────────────────────────
+
+/** Generate a closed ellipse path in NDC. */
+function _ellipsePath(cx, cy, rx, ry, nPts = 120) {
+  return Array.from({ length: nPts + 1 }, (_, i) => {
+    const t = (2 * Math.PI * i) / nPts;
+    return { nx: cx + rx * Math.cos(t), ny: cy + ry * Math.sin(t) };
+  });
+}
+
+/** Small cross marker at (cx, cy) in NDC, arm length armLen. */
+function _cross(cx, cy, armLen = 0.025) {
+  return [
+    [{ nx: cx - armLen, ny: cy }, { nx: cx + armLen, ny: cy }],
+    [{ nx: cx, ny: cy - armLen }, { nx: cx, ny: cy + armLen }],
+  ];
+}
+
+/**
+ * Returns background guide paths showing the rolling-circle geometry:
+ *   • outer ellipse (the fixed track)
+ *   • inner ellipse at t = 0 (the rolling circle in its start position)
+ *   • cross at inner centre
+ *   • pen arm + pen dot for each layer
+ *
+ * Paths are in NDC coordinates at the same scale as generate() so they
+ * overlay correctly on the canvas.
+ */
+export function guide(p) {
+  const type = p.type === 'epi' ? 'epi' : 'hypo';
+
+  let R = Math.max(2, +p.R || 5);
+  let r = Math.max(1, +p.r || 3);
+  const d  = +p.d  || 5;
+  const sx = isFinite(+p.stretchX) ? +p.stretchX : 1;
+  const sy = isFinite(+p.stretchY) ? +p.stretchY : 1;
+  const layers = Math.max(1, p.layers | 0);
+
+  const scale = _normScale(R, r, d, type, sx, sy);
+  const ptFn  = _makePointFn(R, r, type);
+
+  // Inner circle centre at t = 0 in spirograph coordinates
+  const icRaw = type === 'hypo' ? (R - r) : (R + r);
+  const icX   = icRaw * sx * scale;
+  const icY   = 0;
+
+  const paths = [];
+
+  // Outer ellipse (the fixed track, radius R)
+  paths.push(_ellipsePath(0, 0, R * sx * scale, R * sy * scale));
+
+  // Inner ellipse (rolling circle, radius r, at t = 0 position)
+  paths.push(_ellipsePath(icX, icY, r * sx * scale, r * sy * scale));
+
+  // Cross at inner centre
+  paths.push(..._cross(icX, icY, 0.025));
+
+  // Pen arm + pen dot for each layer
+  for (const dVal of _dValues(d, layers)) {
+    const { x: penRawX, y: penRawY } = ptFn(0, dVal);
+    const penX = penRawX * sx * scale;
+    const penY = penRawY * sy * scale;
+
+    // Arm from inner centre to pen point
+    paths.push([{ nx: icX, ny: icY }, { nx: penX, ny: penY }]);
+
+    // Small circle at pen point
+    paths.push(_ellipsePath(penX, penY, 0.018, 0.018, 32));
   }
 
-  if (maxR < 1e-9) return [];
-
-  const scale = 0.95 / maxR;
-  return rawPaths.map(path =>
-    path.map(pt => ({ nx: pt.nx * scale, ny: pt.ny * scale }))
-  );
+  return paths;
 }
