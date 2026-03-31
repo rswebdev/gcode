@@ -59,17 +59,30 @@ function hilbertPoints(order) {
 
 const L_CAP = 300_000;
 
+// Maximum safe order per L-system curve (string length stays below L_CAP).
+// Peano: length = 2·9^n − 1, so order 6 → ~1 062 881 chars (exceeds L_CAP).
+// Gosper: length ≈ 274 513 at order 6 (just under L_CAP, so 6 is the limit).
+// Moore/Hilbert are well within bounds at order 6.
+const CURVE_MAX_ORDER = { hilbert: 6, moore: 6, gosper: 6, peano: 5 };
+
+/**
+ * Expand an L-system string for `iterations` steps.
+ * Returns `{ result, truncated }` — `truncated` is true when the string hit
+ * L_CAP and was cut short, which means the plotted shape would be a prefix only.
+ */
 function lsExpand(axiom, rules, iterations) {
   let s = axiom;
   for (let i = 0; i < iterations; i++) {
     let next = '';
+    let hit  = false;
     for (const ch of s) {
       next += rules[ch] ?? ch;
-      if (next.length >= L_CAP) { next = next.slice(0, L_CAP); break; }
+      if (next.length >= L_CAP) { next = next.slice(0, L_CAP); hit = true; break; }
     }
     s = next;
+    if (hit) return { result: s, truncated: true };
   }
-  return s;
+  return { result: s, truncated: false };
 }
 
 function turtleWalk(str, moveChars, angleDeg) {
@@ -101,8 +114,9 @@ function moorePoints(order) {
     A: '-BF+AFA+FB-',
     B: '+AF-BFB-FA+',
   };
-  const str = lsExpand(axiom, rules, iterations);
-  return turtleWalk(str, ['F'], 90);
+  const { result, truncated } = lsExpand(axiom, rules, iterations);
+  if (truncated) throw new Error(`Moore order ${order} exceeds the complexity limit (L_CAP=${L_CAP}). Reduce order.`);
+  return turtleWalk(result, ['F'], 90);
 }
 
 // ─── Gosper ───────────────────────────────────────────────────────────────────
@@ -113,8 +127,9 @@ function gosperPoints(order) {
     A: 'A-B--B+A++AA+B-',
     B: '+A-BB--B-A++A+B',
   };
-  const str = lsExpand(axiom, rules, order);
-  return turtleWalk(str, ['A', 'B'], 60);
+  const { result, truncated } = lsExpand(axiom, rules, order);
+  if (truncated) throw new Error(`Gosper order ${order} exceeds the complexity limit (L_CAP=${L_CAP}). Reduce order.`);
+  return turtleWalk(result, ['A', 'B'], 60);
 }
 
 // ─── Peano ────────────────────────────────────────────────────────────────────
@@ -122,8 +137,9 @@ function gosperPoints(order) {
 function peanoPoints(order) {
   const axiom = 'F';
   const rules = { F: 'F+F-F-F-F+F+F+F-F' };
-  const str   = lsExpand(axiom, rules, order);
-  return turtleWalk(str, ['F'], 90);
+  const { result, truncated } = lsExpand(axiom, rules, order);
+  if (truncated) throw new Error(`Peano order ${order} exceeds the complexity limit (L_CAP=${L_CAP}). Reduce order to ${CURVE_MAX_ORDER.peano} or less.`);
+  return turtleWalk(result, ['F'], 90);
 }
 
 // ─── Normalise raw {x,y} points → NDC [{nx,ny}] ──────────────────────────────
@@ -157,8 +173,13 @@ function normalise(pts, margin = 0.95) {
  */
 export function generate(p) {
   const props = p ?? {};
-  const order = Math.min(6, Math.max(1, props.order | 0));
   const curve = props.curve ?? 'hilbert';
+  const maxOrder = CURVE_MAX_ORDER[curve] ?? 6;
+  const order = Math.min(maxOrder, Math.max(1, props.order | 0));
+
+  if ((props.order | 0) > maxOrder) {
+    throw new Error(`"${curve}" supports a maximum order of ${maxOrder} (order ${props.order | 0} would exceed the complexity limit). Reduce order.`);
+  }
 
   let raw;
   switch (curve) {
