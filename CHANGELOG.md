@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.7.1] - 2026-03-31
+
+### Features
+- **Documentation**: Added `docs/user-guide.md`, `docs/genart-plugin-api.md`, `docs/viz-plugin-api.md`, and `docs/architecture.md`; rewrote `README.md` to cover all four tabs and link to the new docs.
+
+### Tooling
+- **generate:docs**: New `npm run generate:docs` script (`scripts/generate-docs.sh`) syncs `docs/` and `README.md` to the GitHub wiki on each release; prints actionable setup instructions if the wiki is not yet enabled.
+
 ## [1.7.0] - 2026-03-31
 
 ### Features
