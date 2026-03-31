@@ -101,6 +101,36 @@ async function _importCode(code) {
     if (!plugin.label) throw new Error('Plugin label is required');
     if (!Array.isArray(plugin.params)) throw new Error('Plugin params must be an array');
     if (typeof plugin.generate !== 'function') throw new Error('Plugin must export a generate(params) function');
+
+    // Deep-validate each param entry.
+    const SUPPORTED_TYPES = new Set(['range', 'number', 'select', 'toggle']);
+    const seenIds = new Set();
+    for (const param of plugin.params) {
+      if (!param || typeof param !== 'object') {
+        throw new Error(`Plugin "${plugin.id}": every param must be an object`);
+      }
+      if (typeof param.id !== 'string' || !param.id) {
+        throw new Error(`Plugin "${plugin.id}": param.id must be a non-empty string (got ${JSON.stringify(param.id)})`);
+      }
+      if (seenIds.has(param.id)) {
+        throw new Error(`Plugin "${plugin.id}": duplicate param id "${param.id}"`);
+      }
+      seenIds.add(param.id);
+      if (!SUPPORTED_TYPES.has(param.type)) {
+        throw new Error(`Plugin "${plugin.id}" param "${param.id}": unsupported type "${param.type}" (must be one of: ${[...SUPPORTED_TYPES].join(', ')})`);
+      }
+      if (param.type === 'range' || param.type === 'number') {
+        if (typeof param.min !== 'number' || typeof param.max !== 'number' || typeof param.step !== 'number') {
+          throw new Error(`Plugin "${plugin.id}" param "${param.id}": range/number params require numeric min, max, and step`);
+        }
+      }
+      if (param.type === 'select') {
+        if (!Array.isArray(param.options) || param.options.length === 0) {
+          throw new Error(`Plugin "${plugin.id}" param "${param.id}": select params require a non-empty options array`);
+        }
+      }
+    }
+
     return plugin;
   } finally {
     URL.revokeObjectURL(url);
