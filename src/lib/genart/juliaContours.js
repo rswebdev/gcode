@@ -22,6 +22,7 @@ export const params = [
       { value: 'spiral',     label: 'Spiral'      },
       { value: 'sanmarco',   label: 'San Marco'   },
       { value: 'mandelbrot', label: 'Mandelbrot'  },
+      { value: 'custom',     label: 'Custom'      },
     ],
   },
   { id: 'cx',       label: 'cx (real)',       type: 'number', min: -2,  max: 2,   default: -0.8  },
@@ -61,13 +62,16 @@ const PRESETS = {
  * @returns {Array<Array<{nx:number,ny:number}>>}
  */
 export function generate(p) {
-  const preset   = p.preset || 'dendrite';
-  const presetCfg = PRESETS[preset] ?? PRESETS.dendrite;
+  const preset    = p.preset || 'dendrite';
+  const presetCfg = PRESETS[preset];
 
-  // Preset overrides cx/cy/mode when a recognised preset is chosen
-  const mode    = presetCfg.mode;
-  const cx      = presetCfg.mode === 'julia' ? presetCfg.cx : 0;
-  const cy      = presetCfg.mode === 'julia' ? presetCfg.cy : 0;
+  // 'custom' preset (or unrecognised key) reads cx/cy/mode directly from params.
+  // Named presets override cx/cy/mode so the named shapes are always correct.
+  const mode = presetCfg ? presetCfg.mode : (p.mode || 'julia');
+  const cx   = presetCfg ? (presetCfg.mode === 'julia' ? presetCfg.cx : 0)
+                         : (mode === 'julia' ? (+p.cx || 0) : 0);
+  const cy   = presetCfg ? (presetCfg.mode === 'julia' ? presetCfg.cy : 0)
+                         : (mode === 'julia' ? (+p.cy || 0) : 0);
 
   const levels   = Math.max(1, (p.levels | 0) || 8);
   const maxIter  = Math.max(1, (p.maxIter | 0) || 80);
