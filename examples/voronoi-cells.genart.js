@@ -88,6 +88,89 @@ function centroid(poly) {
   return [cx / (6 * area), cy / (6 * area)];
 }
 
+// ── Edge deduplication + polyline chaining ────────────────────────────────────
+const SNAP = 1e5; // round to 5 decimal places for stable vertex keys
+const snapV = v  => Math.round(v * SNAP) / SNAP;
+const ptKey  = (x, y) => `${snapV(x)},${snapV(y)}`;
+
+/**
+ * Extract unique edges from all cell polygons.
+ * Each shared edge between two neighbouring cells is emitted only once.
+ */
+function uniqueEdges(cells) {
+  const seen  = new Set();
+  const edges = []; // each edge: [{nx,ny}, {nx,ny}]
+
+  for (const poly of cells) {
+    if (poly.length < 3) continue;
+    for (let i = 0; i < poly.length; i++) {
+      const [x1, y1] = poly[i];
+      const [x2, y2] = poly[(i + 1) % poly.length];
+      const k1 = ptKey(x1, y1), k2 = ptKey(x2, y2);
+      const ek = k1 < k2 ? `${k1}|${k2}` : `${k2}|${k1}`;
+      if (!seen.has(ek)) {
+        seen.add(ek);
+        edges.push([
+          { nx: snapV(x1), ny: snapV(y1) },
+          { nx: snapV(x2), ny: snapV(y2) },
+        ]);
+      }
+    }
+  }
+  return edges;
+}
+
+/**
+ * Greedily chain 2-point edges into longer polylines to reduce pen lifts.
+ * At degree-3 Voronoi vertices the path naturally branches; we just pick
+ * the first available neighbour and start a new path at junctions.
+ */
+function chainEdges(edges) {
+  // Build adjacency: vertex key → [{neighbourKey, edgeIdx, reversed}]
+  const adj = new Map();
+  const addAdj = (kFrom, kTo, idx, rev) => {
+    if (!adj.has(kFrom)) adj.set(kFrom, []);
+    adj.get(kFrom).push({ kTo, idx, rev });
+  };
+  edges.forEach(([p1, p2], i) => {
+    const k1 = ptKey(p1.nx, p1.ny), k2 = ptKey(p2.nx, p2.ny);
+    addAdj(k1, k2, i, false);
+    addAdj(k2, k1, i, true);
+  });
+
+  const used  = new Uint8Array(edges.length);
+  const paths = [];
+
+  for (let start = 0; start < edges.length; start++) {
+    if (used[start]) continue;
+    used[start] = 1;
+
+    const [p1, p2] = edges[start];
+    const path = [p1, p2];
+    let curKey = ptKey(p2.nx, p2.ny);
+
+    // Extend greedily forward
+    for (;;) {
+      const nbrs = adj.get(curKey) ?? [];
+      let extended = false;
+      for (const { kTo, idx, rev } of nbrs) {
+        if (!used[idx]) {
+          used[idx] = 1;
+          const [ep1, ep2] = edges[idx];
+          path.push(rev ? ep1 : ep2);
+          curKey = kTo;
+          extended = true;
+          break;
+        }
+      }
+      if (!extended) break;
+    }
+
+    paths.push(path);
+  }
+  return paths;
+}
+
 // ── Plugin ────────────────────────────────────────────────────────────────────
 export default {
   id:    'voronoi-cells',
@@ -129,14 +212,8 @@ export default {
       );
     }
 
-    // Final cells → closed NDC polylines
+    // Final cells → deduplicate shared edges + chain into polylines
     const cells = buildCells(seeds, x0, y0, x1, y1);
-    return cells
-      .filter(poly => poly.length >= 3)
-      .map(poly => {
-        const pts = poly.map(([x, y]) => ({ nx: x, ny: y }));
-        pts.push(pts[0]); // close polygon
-        return pts;
-      });
+    return chainEdges(uniqueEdges(cells));
   },
 };
