@@ -15,8 +15,14 @@
   import * as noiseContours from '../lib/genart/noiseContours.js';
   import * as cyclicCA      from '../lib/genart/cyclicCA.js';
   import * as superformula  from '../lib/genart/superformula.js';
+  import * as lsystem       from '../lib/genart/lsystem.js';
+  import * as attractors    from '../lib/genart/attractors.js';
+  import * as harmonograph  from '../lib/genart/harmonograph.js';
+  import * as spirograph    from '../lib/genart/spirograph.js';
+  import * as juliaContours from '../lib/genart/juliaContours.js';
+  import * as spaceFilling  from '../lib/genart/spaceFilling.js';
 
-  const BUILTIN = [rdiff, noiseContours, cyclicCA, superformula];
+  const BUILTIN = [rdiff, noiseContours, cyclicCA, superformula, lsystem, attractors, harmonograph, spirograph, juliaContours, spaceFilling];
 
   // ---------------------------------------------------------------------------
   // State
