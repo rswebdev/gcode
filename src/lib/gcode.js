@@ -863,16 +863,30 @@ export function sortPaths(paths) {
   return _sortPaths(paths);
 }
 
-function _sortPaths(paths) {
-  if (paths.length < 2) return paths;
+// NDC coordinates of machine home (0,0) — sits at the bottom-left corner of
+// the plot area, approximately equal to NDC (-1,-1).
+const HOME_NX = -1;
+const HOME_NY = -1;
 
+function _sortPaths(paths) {
   const deduped = _deduplicatePaths(paths);
+  if (deduped.length === 0) return deduped;
+
+  // Single path: reverse it if the tail is closer to home than the head.
+  if (deduped.length === 1) {
+    const p = deduped[0];
+    if (p.length > 1) {
+      const dHead = (p[0].nx - HOME_NX) ** 2 + (p[0].ny - HOME_NY) ** 2;
+      const dTail = (p[p.length - 1].nx - HOME_NX) ** 2 + (p[p.length - 1].ny - HOME_NY) ** 2;
+      if (dTail < dHead) return [p.slice().reverse()];
+    }
+    return deduped;
+  }
 
   const remaining = deduped.slice();
   const result    = [];
-  // Start from the NDC equivalent of machine home (0,0) which sits at the
-  // bottom-left of the plot area — approximately NDC (-1,-1).
-  let cx = -1, cy = -1;
+  // Start nearest-neighbour search from machine home ≈ NDC (-1,-1).
+  let cx = HOME_NX, cy = HOME_NY;
 
   while (remaining.length > 0) {
     let bestIdx  = 0;
