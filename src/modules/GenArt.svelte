@@ -93,9 +93,17 @@
 
   /** Update a single param value and trigger auto-gen if enabled. */
   function setParam(id, value) {
+    let updates = { [id]: value };
+
+    // If the 'preset' selector changed and the algorithm exports a presets map,
+    // seed the sibling slider params with the preset's values so they stay in sync.
+    if (id === 'preset' && selected?.presets?.[value]) {
+      Object.assign(updates, selected.presets[value]);
+    }
+
     paramsByAlg = {
       ...paramsByAlg,
-      [selectedId]: { ...(paramsByAlg[selectedId] ?? {}), [id]: value },
+      [selectedId]: { ...(paramsByAlg[selectedId] ?? {}), ...updates },
     };
     _scheduleAutoGen();
   }

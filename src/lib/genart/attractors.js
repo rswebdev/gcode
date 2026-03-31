@@ -13,10 +13,10 @@ export const params = [
   { id: 'steps', label: 'Steps', type: 'range', min: 5000, max: 200000, step: 5000, default: 80000 },
   { id: 'usePreset', label: 'Use preset values', type: 'toggle', default: true },
   // Widened to ±30 to accommodate Lorenz (a=10, b=28) and Rössler (c=5.7)
-  { id: 'a', label: 'a', type: 'number', min: -30, max: 30, default: -1.4 },
-  { id: 'b', label: 'b', type: 'number', min: -30, max: 30, default:  1.6 },
-  { id: 'c', label: 'c', type: 'number', min: -30, max: 30, default:  1.0 },
-  { id: 'd', label: 'd', type: 'number', min: -30, max: 30, default:  0.7 },
+  { id: 'a', label: 'a', type: 'number', min: -30, max: 30, step: 0.1, default: -1.4 },
+  { id: 'b', label: 'b', type: 'number', min: -30, max: 30, step: 0.1, default:  1.6 },
+  { id: 'c', label: 'c', type: 'number', min: -30, max: 30, step: 0.1, default:  1.0 },
+  { id: 'd', label: 'd', type: 'number', min: -30, max: 30, step: 0.1, default:  0.7 },
 ];
 
 const PRESET_DEFAULTS = {

@@ -23,6 +23,9 @@ const PRESETS = {
   pentagon: { R: 5, r: 1, d: 3 },
 };
 
+// Exported so GenArt.svelte can seed slider values when the user picks a preset.
+export const presets = PRESETS;
+
 export const params = [
   {
     id: 'type', label: 'Type', type: 'select', default: 'hypo',
@@ -56,20 +59,13 @@ function gcd(a, b) {
 }
 
 export function generate(p) {
-  const type   = p.type   === 'epi' ? 'epi' : 'hypo';
-  const preset = p.preset || 'rose';
+  const type = p.type === 'epi' ? 'epi' : 'hypo';
 
-  let R, r, d;
-  if (preset === 'custom') {
-    R = +p.R || 5;
-    r = +p.r || 3;
-    d = +p.d || 5;
-  } else {
-    const pre = PRESETS[preset] || PRESETS.rose;
-    R = pre.R;
-    r = pre.r;
-    d = pre.d;
-  }
+  // Always use slider values — presets seed the sliders via GenArt.svelte's
+  // setParam hook, so generate() never needs to override them directly.
+  let R = +p.R || 5;
+  let r = +p.r || 3;
+  let d = +p.d || 5;
 
   R = Math.max(2, R);
   r = Math.max(1, r);
