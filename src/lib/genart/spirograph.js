@@ -73,10 +73,9 @@ export function generate(p) {
 
   R = Math.max(2, R);
   r = Math.max(1, r);
-  if (r === 0) return [];
 
-  const layers     = Math.max(1, p.layers | 0);
-  const stepsPerRev = Math.max(200, p.steps | 0);
+  const layers      = Math.max(1, p.layers | 0);
+  const stepsPerRev = Math.min(4000, Math.max(200, p.steps | 0));
 
   const g    = gcd(R, r);
   const revs = Math.min(50, r / g);

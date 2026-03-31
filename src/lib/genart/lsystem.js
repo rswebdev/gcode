@@ -67,7 +67,7 @@ function turtle(str, angleDeg) {
         heading += rad;
         break;
       case '[':
-        stack.push({ x, y, heading, pathIndex: paths.length, segIndex: current.length - 1 });
+        stack.push({ x, y, heading });
         break;
       case ']': {
         if (current.length > 1) paths.push(current);

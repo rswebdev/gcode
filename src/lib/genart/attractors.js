@@ -11,10 +11,12 @@ export const params = [
       { value: 'halvorsen', label: 'Halvorsen' },
     ]},
   { id: 'steps', label: 'Steps', type: 'range', min: 5000, max: 200000, step: 5000, default: 80000 },
-  { id: 'a', label: 'a', type: 'number', min: -3, max: 3, default: -1.4 },
-  { id: 'b', label: 'b', type: 'number', min: -3, max: 3, default:  1.6 },
-  { id: 'c', label: 'c', type: 'number', min: -3, max: 3, default:  1.0 },
-  { id: 'd', label: 'd', type: 'number', min: -3, max: 3, default:  0.7 },
+  { id: 'usePreset', label: 'Use preset values', type: 'toggle', default: true },
+  // Widened to ±30 to accommodate Lorenz (a=10, b=28) and Rössler (c=5.7)
+  { id: 'a', label: 'a', type: 'number', min: -30, max: 30, default: -1.4 },
+  { id: 'b', label: 'b', type: 'number', min: -30, max: 30, default:  1.6 },
+  { id: 'c', label: 'c', type: 'number', min: -30, max: 30, default:  1.0 },
+  { id: 'd', label: 'd', type: 'number', min: -30, max: 30, default:  0.7 },
 ];
 
 const PRESET_DEFAULTS = {
@@ -25,17 +27,13 @@ const PRESET_DEFAULTS = {
   halvorsen: { a:  1.4, b:  0,   c:  0,     d:  0   },
 };
 
-// Clifford defaults are also the param defaults — use to detect "untouched"
-const PARAM_DEFAULTS = { a: -1.4, b: 1.6, c: 1.0, d: 0.7 };
-
+// Use an explicit flag (usePreset) instead of a fragile numeric sentinel.
+// When usePreset is true (the default), PRESET_DEFAULTS[p.preset] is used so
+// switching presets always picks the correct coefficients even when a/b/c/d
+// happen to equal another preset's values.
 function resolveABCD(p) {
-  const usingParamDefaults =
-    p.a === PARAM_DEFAULTS.a &&
-    p.b === PARAM_DEFAULTS.b &&
-    p.c === PARAM_DEFAULTS.c &&
-    p.d === PARAM_DEFAULTS.d;
-  if (usingParamDefaults) return { ...PRESET_DEFAULTS[p.preset] };
-  return { a: p.a, b: p.b, c: p.c, d: p.d };
+  if (p.usePreset !== false) return { ...PRESET_DEFAULTS[p.preset] };
+  return { a: +p.a, b: +p.b, c: +p.c, d: +p.d };
 }
 
 function normalize(pts) {
@@ -97,17 +95,11 @@ function dejongPoints(a, b, c, d, steps) {
   return pts;
 }
 
-function lorenzPoints(a, b, c, steps) {
-  // dx = a(y-x), dy = x(b-z)-y, dz = xy-cz  project xz plane
-  const dt = 0.005;
+// Shared RK4 integrator for 3D ODE attractors.
+// deriv(x,y,z) → [dx,dy,dz]; proj(x,y,z) → {x,y} for the 2D projection.
+function integrateRK4(dt, steps, transient, x0, y0, z0, deriv, proj) {
   const pts = [];
-  let x = 0.1, y = 0, z = 0;
-  const transient = 1000;
-
-  function deriv(x, y, z) {
-    return [a * (y - x), x * (b - z) - y, x * y - c * z];
-  }
-
+  let x = x0, y = y0, z = z0;
   for (let i = 0; i < steps + transient; i++) {
     const [k1x, k1y, k1z] = deriv(x, y, z);
     const [k2x, k2y, k2z] = deriv(x + k1x*dt/2, y + k1y*dt/2, z + k1z*dt/2);
@@ -116,67 +108,33 @@ function lorenzPoints(a, b, c, steps) {
     x += dt * (k1x + 2*k2x + 2*k3x + k4x) / 6;
     y += dt * (k1y + 2*k2y + 2*k3y + k4y) / 6;
     z += dt * (k1z + 2*k2z + 2*k3z + k4z) / 6;
-    if (i >= transient && isFinite(x) && isFinite(z)) {
-      pts.push({ x, y: z });
+    if (i >= transient) {
+      const pt = proj(x, y, z);
+      if (isFinite(pt.x) && isFinite(pt.y)) pts.push(pt);
     }
   }
   return pts;
+}
+
+function lorenzPoints(a, b, c, steps) {
+  // dx = a(y-x), dy = x(b-z)-y, dz = xy-cz  — project xz plane
+  return integrateRK4(0.005, steps, 1000, 0.1, 0, 0,
+    (x, y, z) => [a*(y-x), x*(b-z)-y, x*y-c*z],
+    (x, _y, z) => ({ x, y: z }));
 }
 
 function rosslerPoints(a, b, c, steps) {
-  // dx=-y-z, dy=x+ay, dz=b+z(x-c)  project xy
-  const dt = 0.05;
-  const pts = [];
-  let x = 0.1, y = 0, z = 0;
-  const transient = 1000;
-
-  function deriv(x, y, z) {
-    return [-y - z, x + a * y, b + z * (x - c)];
-  }
-
-  for (let i = 0; i < steps + transient; i++) {
-    const [k1x, k1y, k1z] = deriv(x, y, z);
-    const [k2x, k2y, k2z] = deriv(x + k1x*dt/2, y + k1y*dt/2, z + k1z*dt/2);
-    const [k3x, k3y, k3z] = deriv(x + k2x*dt/2, y + k2y*dt/2, z + k2z*dt/2);
-    const [k4x, k4y, k4z] = deriv(x + k3x*dt, y + k3y*dt, z + k3z*dt);
-    x += dt * (k1x + 2*k2x + 2*k3x + k4x) / 6;
-    y += dt * (k1y + 2*k2y + 2*k3y + k4y) / 6;
-    z += dt * (k1z + 2*k2z + 2*k3z + k4z) / 6;
-    if (i >= transient && isFinite(x) && isFinite(y)) {
-      pts.push({ x, y });
-    }
-  }
-  return pts;
+  // dx=-y-z, dy=x+ay, dz=b+z(x-c)  — project xy
+  return integrateRK4(0.05, steps, 1000, 0.1, 0, 0,
+    (x, y, z) => [-y-z, x+a*y, b+z*(x-c)],
+    (x, y, _z) => ({ x, y }));
 }
 
 function halvorsenPoints(a, steps) {
-  // dx=-a*x-4y-4z-y^2, dy=-a*y-4z-4x-z^2, dz=-a*z-4x-4y-x^2  project xy
-  const dt = 0.005;
-  const pts = [];
-  let x = 0.1, y = 0, z = 0;
-  const transient = 1000;
-
-  function deriv(x, y, z) {
-    return [
-      -a*x - 4*y - 4*z - y*y,
-      -a*y - 4*z - 4*x - z*z,
-      -a*z - 4*x - 4*y - x*x,
-    ];
-  }
-
-  for (let i = 0; i < steps + transient; i++) {
-    const [k1x, k1y, k1z] = deriv(x, y, z);
-    const [k2x, k2y, k2z] = deriv(x + k1x*dt/2, y + k1y*dt/2, z + k1z*dt/2);
-    const [k3x, k3y, k3z] = deriv(x + k2x*dt/2, y + k2y*dt/2, z + k2z*dt/2);
-    const [k4x, k4y, k4z] = deriv(x + k3x*dt, y + k3y*dt, z + k3z*dt);
-    x += dt * (k1x + 2*k2x + 2*k3x + k4x) / 6;
-    y += dt * (k1y + 2*k2y + 2*k3y + k4y) / 6;
-    z += dt * (k1z + 2*k2z + 2*k3z + k4z) / 6;
-    if (i >= transient && isFinite(x) && isFinite(y)) {
-      pts.push({ x, y });
-    }
-  }
-  return pts;
+  // dx=-ax-4y-4z-y², dy=-ay-4z-4x-z², dz=-az-4x-4y-x²  — project xy
+  return integrateRK4(0.005, steps, 1000, 0.1, 0, 0,
+    (x, y, z) => [-a*x-4*y-4*z-y*y, -a*y-4*z-4*x-z*z, -a*z-4*x-4*y-x*x],
+    (x, y, _z) => ({ x, y }));
 }
 
 export function generate(p) {

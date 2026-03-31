@@ -73,10 +73,10 @@ function lsExpand(axiom, rules, iterations) {
 }
 
 function turtleWalk(str, moveChars, angleDeg) {
-  const pts   = [];
   let x = 0, y = 0, angle = 0;
-  const step  = 1;
-  const rad   = (angleDeg * Math.PI) / 180;
+  const step = 1;
+  const rad  = (angleDeg * Math.PI) / 180;
+  const pts  = [{ x, y }]; // include starting position so the first segment is not dropped
 
   for (const ch of str) {
     if (moveChars.includes(ch)) {
@@ -156,8 +156,9 @@ function normalise(pts, margin = 0.95) {
  * @returns {Array<Array<{nx:number,ny:number}>>}
  */
 export function generate(p) {
-  const order = Math.min(6, Math.max(1, p.order | 0));
-  const curve = p.curve ?? 'hilbert';
+  const props = p ?? {};
+  const order = Math.min(6, Math.max(1, props.order | 0));
+  const curve = props.curve ?? 'hilbert';
 
   let raw;
   switch (curve) {

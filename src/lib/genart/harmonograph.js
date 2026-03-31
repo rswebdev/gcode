@@ -8,11 +8,11 @@
  */
 
 const PRESETS = {
-  rose:     { f1: 2, f2: 3, f3: 2, f4: 3, p1: 0,          p2: Math.PI / 2, p3: Math.PI / 2, p4: 0           },
-  figure8:  { f1: 1, f2: 2, f3: 1, f4: 2, p1: 0,          p2: 0,           p3: Math.PI / 2, p4: Math.PI / 2  },
-  web:      { f1: 3, f2: 2, f3: 3, f4: 2, p1: Math.PI / 4, p2: 0,          p3: 0,           p4: Math.PI / 3  },
-  complex:  { f1: 3, f2: 5, f3: 4, f4: 6, p1: 0,          p2: Math.PI / 4, p3: Math.PI / 3, p4: Math.PI / 6  },
-  infinity: { f1: 1, f2: 2, f3: 2, f4: 1, p1: Math.PI / 2, p2: 0,          p3: 0,           p4: Math.PI / 2  },
+  rose:     { f1: 2, f2: 3, f3: 2, f4: 3, damping: 0.002, p1: 0,           p2: Math.PI / 2, p3: Math.PI / 2, p4: 0            },
+  figure8:  { f1: 1, f2: 2, f3: 1, f4: 2, damping: 0.002, p1: 0,           p2: 0,           p3: Math.PI / 2, p4: Math.PI / 2  },
+  web:      { f1: 3, f2: 2, f3: 3, f4: 2, damping: 0.003, p1: Math.PI / 4, p2: 0,           p3: 0,           p4: Math.PI / 3  },
+  complex:  { f1: 3, f2: 5, f3: 4, f4: 6, damping: 0.001, p1: 0,           p2: Math.PI / 4, p3: Math.PI / 3, p4: Math.PI / 6  },
+  infinity: { f1: 1, f2: 2, f3: 2, f4: 1, damping: 0.002, p1: Math.PI / 2, p2: 0,           p3: 0,           p4: Math.PI / 2  },
 };
 
 export const id    = 'harmonograph';
@@ -43,17 +43,20 @@ export const params = [
  */
 export function generate(p) {
   const preset   = PRESETS[p.preset] ?? PRESETS.rose;
-  const f1       = +p.f1;
-  const f2       = +p.f2;
-  const f3       = +p.f3;
-  const f4       = +p.f4;
-  const damping  = +p.damping;
-  const steps    = p.steps | 0;
-
   const { p1, p2, p3, p4 } = preset;
+
+  // Fall back to preset values when numeric params are missing or non-finite
+  const f1      = isFinite(+p.f1)      ? +p.f1      : preset.f1;
+  const f2      = isFinite(+p.f2)      ? +p.f2      : preset.f2;
+  const f3      = isFinite(+p.f3)      ? +p.f3      : preset.f3;
+  const f4      = isFinite(+p.f4)      ? +p.f4      : preset.f4;
+  const damping = isFinite(+p.damping) ? +p.damping : preset.damping;
+  const steps   = Math.max(100, p.steps | 0);
 
   const totalTime = damping > 0 ? Math.min(-Math.log(0.01) / damping, 200) : 200;
   const dt        = totalTime / steps;
+
+  if (!isFinite(dt) || dt <= 0) return [];
 
   const xs = new Float64Array(steps + 1);
   const ys = new Float64Array(steps + 1);
