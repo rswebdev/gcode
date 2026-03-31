@@ -73,14 +73,18 @@ export function generate(p) {
     const tmp = grid; grid = next; next = tmp;
   }
 
-  // Convert integer state grid to float for marching squares
-  const field = new Float32Array(N * N);
-  for (let i = 0; i < N * N; i++) field[i] = grid[i];
-
-  // Extract one iso-contour per state boundary (at k + 0.5 for k = 0..nStates-2)
+  // Extract one iso-contour per state transition k → (k+1) % nStates.
+  // Build a binary field for each transition so only that boundary produces
+  // a 0.5 contour; avoids the wrap boundary being counted by every threshold.
   const paths = [];
-  for (let k = 0; k < nStates - 1; k++) {
-    const segs = marchingSquares(field, N, k + 0.5);
+  const transitionField = new Float32Array(N * N);
+  for (let k = 0; k < nStates; k++) {
+    const kNext = (k + 1) % nStates;
+    for (let i = 0; i < N * N; i++) {
+      const s = grid[i];
+      transitionField[i] = s === kNext ? 0 : 1; // 0 only on the kNext side
+    }
+    const segs = marchingSquares(transitionField, N, 0.5);
     for (const path of segs) paths.push(path);
   }
   return paths;
