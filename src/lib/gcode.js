@@ -870,7 +870,9 @@ function _sortPaths(paths) {
 
   const remaining = deduped.slice();
   const result    = [];
-  let cx = 0, cy = 0;  // current head position in NDC
+  // Start from the NDC equivalent of machine home (0,0) which sits at the
+  // bottom-left of the plot area — approximately NDC (-1,-1).
+  let cx = -1, cy = -1;
 
   while (remaining.length > 0) {
     let bestIdx  = 0;
