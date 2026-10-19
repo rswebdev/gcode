@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { codeArtExamples } from '../src/lib/genart/codeArtExamples.js';
 
 // ---------------------------------------------------------------------------
 // App shell
@@ -111,6 +112,7 @@ test('Code Art runs helper functions and sends paths to G-code', async ({ page }
 });
 
 test('Code Art renders composed objects through a shared scene', async ({ page }) => {
+  test.setTimeout(60000);
   await page.goto('/');
   await page.getByRole('button', { name: 'Gen Art', exact: true }).click();
   await expect(page.getByLabel('Algorithm')).toHaveValue('code-art');
@@ -119,7 +121,7 @@ test('Code Art renders composed objects through a shared scene', async ({ page }
   const editor = page.locator('.cm-content[aria-label="Art code"]');
   const algorithm = page.getByLabel('Algorithm');
   const canvas = page.locator('.genart-wrap canvas');
-  for (const example of ['cube-study', 'sphere-study', 'orbital-sculpture', 'helix-tower', 'courtyard', 'droplet-ripples']) {
+  for (const { id: example } of codeArtExamples) {
     await examples.selectOption(example);
     await page.getByRole('button', { name: 'Load', exact: true }).click();
     await expect(editor).not.toBeEmpty();
@@ -138,15 +140,15 @@ test('Code Art renders composed objects through a shared scene', async ({ page }
       return count;
     });
     expect(coloredPixels, `${example} should render scene paths`).toBeGreaterThan(0);
-    if (example === 'courtyard') {
-      await expect(canvas).toHaveScreenshot('code-art-courtyard.png');
+    if (['courtyard', 'edge-city', 'bead-strands', 'boolean-sculpture', 'bounded-function', 'mesh-slices'].includes(example)) {
+      await expect(canvas).toHaveScreenshot(`code-art-${example}.png`);
     }
     if (example === 'droplet-ripples') {
       await expect(canvas).toHaveScreenshot('code-art-droplet-ripples.png');
-      await sendButton.click();
-      await expect(page.getByRole('button', { name: 'G-code', exact: true })).toHaveClass(/active/);
     }
   }
+  await sendButton.click();
+  await expect(page.getByRole('button', { name: 'G-code', exact: true })).toHaveClass(/active/);
 });
 
 test('Code Art height-field grid renders and reports invalid height formulas', async ({ page }) => {

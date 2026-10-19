@@ -11,21 +11,20 @@
   } from '../lib/genartPluginLoader.js';
 
   // Built-in algorithms
-  import * as rdiff         from '../lib/genart/reactionDiffusion.js';
   import * as noiseContours from '../lib/genart/noiseContours.js';
-  import * as cyclicCA      from '../lib/genart/cyclicCA.js';
   import * as superformula  from '../lib/genart/superformula.js';
   import * as lsystem       from '../lib/genart/lsystem.js';
-  import * as attractors    from '../lib/genart/attractors.js';
   import * as harmonograph  from '../lib/genart/harmonograph.js';
   import * as spirograph    from '../lib/genart/spirograph.js';
   import * as juliaContours from '../lib/genart/juliaContours.js';
   import * as spaceFilling  from '../lib/genart/spaceFilling.js';
   import * as codeArt       from '../lib/genart/codeArt.js';
   import { codeArtExamples } from '../lib/genart/codeArtExamples.js';
+  import { createCodeArtWorkerClient } from '../lib/genart/codeArtWorkerClient.js';
   import GenArtCodeEditor from './GenArtCodeEditor.svelte';
+  import GenArtExampleHelp from './GenArtExampleHelp.svelte';
 
-  const BUILTIN = [rdiff, noiseContours, cyclicCA, superformula, lsystem, attractors, harmonograph, spirograph, juliaContours, spaceFilling, codeArt];
+  const BUILTIN = [noiseContours, superformula, lsystem, harmonograph, spirograph, juliaContours, spaceFilling, codeArt];
 
   // ---------------------------------------------------------------------------
   // State
@@ -40,7 +39,26 @@
   let autoGen      = false;
   let codeSource   = codeArt.DEFAULT_CODE;
   let codeSaveError = '';
+  const LAYOUT_KEY = 'gcode-genart-layout';
+  const MIN_EDITOR_HEIGHT = 220;
+  const MAX_EDITOR_HEIGHT = 1600;
+  let layout;
+  let editorFrame;
+  let layoutObserver;
+  let layoutWidth = 0;
+  let sidebarWidth = 220;
+  let codeSidebarWidth = 390;
+  let editorHeight = 320;
+  let layoutError = '';
+  let resizeDrag = null;
   let selectedCodeExample = codeArtExamples[0].id;
+  let showExampleHelp = false;
+  let codeAssets = {};
+  let assetsLoading = false;
+  let assetRevision = 0;
+  let generationRevision = 0;
+  let destroyed = false;
+  const codeArtWorker = createCodeArtWorkerClient();
 
   // Plugin panel
   let pluginPanelOpen = false;
@@ -59,6 +77,11 @@
 
   // Restore persisted plugins on mount
   onMount(async () => {
+    restoreLayout();
+    layoutObserver = new ResizeObserver(() => {
+      if (layout.clientWidth > 0) layoutWidth = layout.clientWidth;
+    });
+    layoutObserver.observe(layout);
     try {
       codeSource = localStorage.getItem('gcode-genart-code') ?? codeArt.DEFAULT_CODE;
     } catch (err) {
@@ -69,8 +92,94 @@
   });
 
   onDestroy(() => {
+    destroyed = true;
+    assetRevision++;
+    invalidateGeneration();
     resizeOb?.disconnect();
+    layoutObserver?.disconnect();
+    finishResize();
   });
+
+  $: maxSidebarWidth = Math.max(80, layoutWidth ? layoutWidth - 129 : 1200);
+  $: minSidebarWidth = Math.min(200, maxSidebarWidth);
+  $: preferredSidebarWidth = selectedId === codeArt.id ? codeSidebarWidth : sidebarWidth;
+  $: displayedSidebarWidth = Math.max(minSidebarWidth, Math.min(maxSidebarWidth, preferredSidebarWidth));
+
+  function restoreLayout() {
+    try {
+      const stored = localStorage.getItem(LAYOUT_KEY);
+      if (stored === null) return;
+      const settings = JSON.parse(stored);
+      if (!settings || ![settings.sidebarWidth, settings.codeSidebarWidth, settings.editorHeight].every(Number.isFinite)
+          || settings.sidebarWidth < 80 || settings.codeSidebarWidth < 80
+          || settings.editorHeight < MIN_EDITOR_HEIGHT || settings.editorHeight > MAX_EDITOR_HEIGHT) {
+        throw new TypeError('Invalid saved Gen Art panel dimensions');
+      }
+      ({ sidebarWidth, codeSidebarWidth, editorHeight } = settings);
+    } catch (error) {
+      layoutError = `Could not restore panel sizes: ${error.message ?? String(error)}`;
+    }
+  }
+
+  function saveLayout() {
+    try {
+      localStorage.setItem(LAYOUT_KEY, JSON.stringify({ sidebarWidth, codeSidebarWidth, editorHeight }));
+      layoutError = '';
+    } catch (error) {
+      layoutError = `Could not save panel sizes: ${error.message ?? String(error)}`;
+    }
+  }
+
+  function setPanelSize(panel, value) {
+    if (panel === 'editor') {
+      editorHeight = Math.round(Math.max(MIN_EDITOR_HEIGHT, Math.min(MAX_EDITOR_HEIGHT, value)));
+    } else {
+      const width = Math.round(Math.max(minSidebarWidth, Math.min(maxSidebarWidth, value)));
+      if (selectedId === codeArt.id) codeSidebarWidth = width;
+      else sidebarWidth = width;
+    }
+  }
+
+  function startResize(event, panel) {
+    if (event.button !== 0 || resizeDrag) return;
+    event.preventDefault();
+    event.currentTarget.focus({ preventScroll: true });
+    resizeDrag = {
+      panel,
+      pointerId: event.pointerId,
+      handle: event.currentTarget,
+      origin: panel === 'editor' ? event.clientY : event.clientX,
+      size: panel === 'editor' ? editorFrame.getBoundingClientRect().height : displayedSidebarWidth,
+    };
+    event.currentTarget.setPointerCapture(event.pointerId);
+  }
+
+  function moveResize(event) {
+    if (!resizeDrag || event.pointerId !== resizeDrag.pointerId) return;
+    const coordinate = resizeDrag.panel === 'editor' ? event.clientY : event.clientX;
+    setPanelSize(resizeDrag.panel, resizeDrag.size + coordinate - resizeDrag.origin);
+  }
+
+  function finishResize() {
+    if (!resizeDrag) return;
+    const { handle, pointerId } = resizeDrag;
+    resizeDrag = null;
+    if (handle.hasPointerCapture(pointerId)) handle.releasePointerCapture(pointerId);
+    saveLayout();
+  }
+
+  function resizeWithKeyboard(event, panel) {
+    const previous = panel === 'editor' ? 'ArrowUp' : 'ArrowLeft';
+    const next = panel === 'editor' ? 'ArrowDown' : 'ArrowRight';
+    if (![previous, next, 'Home', 'End'].includes(event.key)) return;
+    event.preventDefault();
+    const min = panel === 'editor' ? MIN_EDITOR_HEIGHT : minSidebarWidth;
+    const max = panel === 'editor' ? MAX_EDITOR_HEIGHT : maxSidebarWidth;
+    const current = panel === 'editor' ? editorHeight : displayedSidebarWidth;
+    const delta = (event.shiftKey ? 50 : 10) * (event.key === previous ? -1 : 1);
+    setPanelSize(panel, event.key === 'Home' ? min : event.key === 'End' ? max : current + delta);
+    saveLayout();
+  }
 
   // Re-render when this tab becomes active (canvas may have been 0-size before)
   $: if ($activeTab === 'genart') {
@@ -87,6 +196,7 @@
   }
 
   function handleCodeChange(value) {
+    invalidateGeneration();
     codeSource = value;
     saveCode();
     _scheduleAutoGen();
@@ -95,11 +205,50 @@
   function loadCodeExample() {
     const example = codeArtExamples.find(item => item.id === selectedCodeExample);
     if (!example) throw new Error(`Unknown Code Art example: ${selectedCodeExample}`);
+    invalidateGeneration();
     codeSource = example.code;
     saveCode();
     genError = '';
     currentPaths = [];
     _renderPaths([]);
+    _scheduleAutoGen();
+  }
+
+  async function handleAssets(event) {
+    const files = Array.from(event.target.files ?? []);
+    event.target.value = '';
+    if (!files.length) return;
+    invalidateGeneration();
+    const revision = ++assetRevision;
+    assetsLoading = true;
+    try {
+      const totalBytes = files.reduce((total, file) => total + file.size, 0)
+        + Object.entries(codeAssets).reduce((total, [name, value]) => (
+          files.some(file => file.name === name) ? total
+            : total + (typeof value === 'string' ? new TextEncoder().encode(value).byteLength : value.byteLength)
+        ), 0);
+      if (totalBytes > 20 * 1024 * 1024) throw new RangeError('Local assets exceed the 20 MiB total limit');
+      const entries = await Promise.all(files.map(async file => [
+        file.name,
+        await (file.name.toLowerCase().endsWith('.stl') ? file.arrayBuffer() : file.text()),
+      ]));
+      if (destroyed || revision !== assetRevision) return;
+      invalidateGeneration();
+      codeAssets = { ...codeAssets, ...Object.fromEntries(entries) };
+      _scheduleAutoGen();
+    } catch (error) {
+      if (!destroyed && revision === assetRevision) {
+        invalidateGeneration();
+        genError = `Could not load local assets: ${error.message ?? String(error)}`;
+      }
+    } finally {
+      if (!destroyed && revision === assetRevision) assetsLoading = false;
+    }
+  }
+
+  function removeAsset(name) {
+    invalidateGeneration();
+    codeAssets = Object.fromEntries(Object.entries(codeAssets).filter(([key]) => key !== name));
     _scheduleAutoGen();
   }
 
@@ -113,6 +262,7 @@
   // back to the first available one so selectedId is always a live key,
   // and discard stale paths from the removed algorithm.
   $: if (algorithms.length && !algorithms.some(a => a.id === selectedId)) {
+    invalidateGeneration();
     selectedId   = algorithms[0].id;
     currentPaths = [];
     tick().then(() => _renderPaths([]));
@@ -248,34 +398,57 @@
   // ---------------------------------------------------------------------------
 
   async function generate() {
-    if (generating || !selected) return;
+    if (generating || assetsLoading || !selected || destroyed) return;
+    invalidateGeneration();
+    const revision = generationRevision;
+    const algorithm = selected;
+    const p = {
+      ...(paramsByAlg[selectedId] ?? {}),
+      ...(selectedId === codeArt.id ? { code: codeSource, assets: codeAssets } : {}),
+    };
     generating = true;
     genError   = '';
     try {
       // Yield to browser to show spinner, then compute
       await tick();
       await new Promise(resolve => setTimeout(resolve, 0));
-      const p = {
-        ...(paramsByAlg[selectedId] ?? {}),
-        ...(selectedId === codeArt.id ? { code: codeSource } : {}),
-      };
-      const paths = selected.generate(p);
+      if (destroyed || revision !== generationRevision) return;
+      const paths = algorithm.id === codeArt.id
+        ? await codeArtWorker.generate(p)
+        : algorithm.generate(p);
+      if (destroyed || revision !== generationRevision) return;
       currentPaths = paths;
       _renderPaths(paths);
     } catch (err) {
+      if (destroyed || revision !== generationRevision) return;
       genError = err.message ?? String(err);
       currentPaths = [];
       _renderPaths([]);
     } finally {
-      generating = false;
+      if (!destroyed && revision === generationRevision) generating = false;
     }
+  }
+
+  function invalidateGeneration() {
+    generationRevision++;
+    clearTimeout(_autoTimer);
+    codeArtWorker.cancel();
+    generating = false;
+    genError = '';
+    currentPaths = [];
+    _renderPaths([]);
+  }
+
+  function cancelGeneration() {
+    invalidateGeneration();
+    genError = 'Code Art generation cancelled.';
   }
 
   // Auto-generate: debounced re-run on param change (called explicitly from setParam)
   let _autoTimer;
   function _scheduleAutoGen() {
-    if (!autoGen) return;
     clearTimeout(_autoTimer);
+    if (!autoGen || destroyed) return;
     _autoTimer = setTimeout(generate, 350);
   }
 
@@ -284,7 +457,7 @@
   // ---------------------------------------------------------------------------
 
   function sendToGcode() {
-    if (currentPaths.length === 0) return;
+    if (generating || currentPaths.length === 0) return;
     activePaths.set(currentPaths);
     importedPathCount.set(0);
     cameraAspect.set(1); // square canvas
@@ -327,15 +500,20 @@
 <!-- =========================================================
      Layout: sidebar left + canvas right
      ========================================================= -->
-<div class="genart-wrap" class:code-mode={selectedId === codeArt.id}>
+<div
+  class="genart-wrap"
+  class:resizing={resizeDrag !== null}
+  bind:this={layout}
+  style:--sidebar-width={`${displayedSidebarWidth}px`}
+>
 
   <!-- Sidebar -->
-  <aside class="sidebar">
+  <aside class="sidebar" id="genart-sidebar">
 
     <!-- Algorithm selector -->
     <section class="sidebar-group">
       <label class="section-label" for="genart-alg-select">Algorithm</label>
-      <select id="genart-alg-select" bind:value={selectedId} on:change={() => { currentPaths = []; _renderPaths([]); }}>
+      <select id="genart-alg-select" bind:value={selectedId} on:change={invalidateGeneration}>
         {#each algorithms as alg (alg.id)}
           <option value={alg.id}>{alg.label}</option>
         {/each}
@@ -344,10 +522,13 @@
 
     <!-- Actions -->
     <section class="sidebar-group action-row">
-      <button class="btn-primary" on:click={generate} disabled={generating}>
+      <button class="btn-primary" on:click={generate} disabled={generating || assetsLoading}>
         {generating ? 'Generating…' : 'Generate'}
       </button>
-      <button class="btn-gcode" on:click={sendToGcode} disabled={currentPaths.length === 0}>
+      {#if generating && selectedId === codeArt.id}
+        <button on:click={cancelGeneration}>Cancel</button>
+      {/if}
+      <button class="btn-gcode" on:click={sendToGcode} disabled={generating || currentPaths.length === 0}>
         → G-code
       </button>
     </section>
@@ -355,7 +536,7 @@
     <!-- Auto-generate toggle -->
     <section class="sidebar-group">
       <label class="inline-check">
-        <input type="checkbox" bind:checked={autoGen} />
+        <input type="checkbox" bind:checked={autoGen} on:change={() => { if (!autoGen) clearTimeout(_autoTimer); }} />
         Auto-generate
       </label>
     </section>
@@ -363,18 +544,64 @@
     {#if genError}
       <p class="error-msg">{genError}</p>
     {/if}
+    {#if layoutError}
+      <p class="error-msg" role="alert">{layoutError}</p>
+    {/if}
 
     {#if selectedId === codeArt.id}
       <section class="sidebar-group code-editor-group">
         <label class="section-label" for="genart-code">Art code</label>
-        <GenArtCodeEditor value={codeSource} onChange={handleCodeChange} />
+        <div id="genart-editor-frame" class="editor-frame" bind:this={editorFrame} style:height={`${editorHeight}px`}>
+          <GenArtCodeEditor value={codeSource} onChange={handleCodeChange} />
+        </div>
+        <!-- Focusable separators implement the ARIA window-splitter pattern. -->
+        <!-- svelte-ignore a11y_no_noninteractive_tabindex a11y_no_noninteractive_element_interactions -->
+        <div
+          tabindex="0"
+          class="resize-handle editor-resize"
+          role="separator"
+          aria-label="Resize art code editor"
+          aria-controls="genart-editor-frame"
+          aria-orientation="horizontal"
+          aria-valuemin={MIN_EDITOR_HEIGHT}
+          aria-valuemax={MAX_EDITOR_HEIGHT}
+          aria-valuenow={editorHeight}
+          aria-valuetext={`${editorHeight} pixels high`}
+          title="Drag to resize editor; use Up/Down arrows, Home or End"
+          on:pointerdown={event => startResize(event, 'editor')}
+          on:pointermove={moveResize}
+          on:pointerup={finishResize}
+          on:pointercancel={finishResize}
+          on:lostpointercapture={finishResize}
+          on:keydown={event => resizeWithKeyboard(event, 'editor')}
+        ></div>
+        <label class="section-label" for="code-art-assets">Local assets</label>
+        <input
+          id="code-art-assets"
+          type="file"
+          multiple
+          accept=".obj,.stl,.csv,.json,.txt"
+          disabled={assetsLoading}
+          on:change={handleAssets}
+        />
+        {#if assetsLoading}<span>Loading local assets…</span>{/if}
+        {#each Object.keys(codeAssets) as name (name)}
+          <div class="installed-item">
+            <span>{name}</span>
+            <button aria-label={`Remove ${name}`} on:click={() => removeAsset(name)}>×</button>
+          </div>
+        {/each}
         <div class="code-api">
           <strong>API</strong>
           <code>scene().add(solid.sphere(...)).render(camera)</code>
           <code>solid.heightfield({"{ height: (x, y) => ..., style: 'parallel' }"})</code>
           <code>shape.translate/rotate/scale(...)</code>
+          <code>shape.draw('edges' / 'silhouette' / 'grid' / 'none')</code>
+          <code>paths3d(paths), mesh.obj(assets['model.obj'])</code>
+          <code>solid.union/intersection/difference(...shapes)</code>
           <code>sphere, cube, torus, cylinder(options)</code>
           <code>circle(options), polyline(points, options)</code>
+          <code>contours(field, size, threshold)</code>
         </div>
         <div class="example-picker">
           <label class="section-label" for="code-art-example">Examples</label>
@@ -385,8 +612,14 @@
               {/each}
             </select>
             <button on:click={loadCodeExample}>Load</button>
+            <button
+              aria-label="Example help"
+              aria-haspopup="dialog"
+              on:click={() => { showExampleHelp = true; }}
+            >Help</button>
           </div>
-          <span class="example-credit">Original studies inspired by fogleman/ln</span>
+
+          <span class="example-credit">3D studies inspired by fogleman/ln</span>
         </div>
         {#if codeSaveError}
           <p class="error-msg">{codeSaveError}</p>
@@ -498,6 +731,27 @@
 
   </aside>
 
+  <!-- svelte-ignore a11y_no_noninteractive_tabindex a11y_no_noninteractive_element_interactions -->
+  <div
+    tabindex="0"
+    class="resize-handle sidebar-resize"
+    role="separator"
+    aria-label="Resize Gen Art sidebar"
+    aria-controls="genart-sidebar"
+    aria-orientation="vertical"
+    aria-valuemin={minSidebarWidth}
+    aria-valuemax={maxSidebarWidth}
+    aria-valuenow={displayedSidebarWidth}
+    aria-valuetext={`${displayedSidebarWidth} pixels wide`}
+    title="Drag to resize sidebar; use Left/Right arrows, Home or End"
+    on:pointerdown={event => startResize(event, 'sidebar')}
+    on:pointermove={moveResize}
+    on:pointerup={finishResize}
+    on:pointercancel={finishResize}
+    on:lostpointercapture={finishResize}
+    on:keydown={event => resizeWithKeyboard(event, 'sidebar')}
+  ></div>
+
   <!-- Canvas area -->
   <div class="canvas-area">
     <canvas bind:this={canvas}></canvas>
@@ -505,8 +759,13 @@
 
 </div>
 
+{#if showExampleHelp}
+  <GenArtExampleHelp exampleId={selectedCodeExample} onClose={() => { showExampleHelp = false; }} />
+{/if}
+
 <style>
   .genart-wrap {
+    position: relative;
     display: flex;
     height: 100%;
     overflow: hidden;
@@ -514,9 +773,8 @@
 
   /* ---- Sidebar ---- */
   .sidebar {
-    width: 220px;
-    min-width: 200px;
-    max-width: 240px;
+    width: var(--sidebar-width);
+    min-width: 0;
     flex-shrink: 0;
     background: #111;
     border-right: 1px solid #252525;
@@ -527,14 +785,72 @@
     overflow-x: hidden;
   }
 
-  .code-mode .sidebar {
-    width: 390px;
-    max-width: 440px;
+  .editor-frame {
+    display: flex;
+    flex: none;
+    min-width: 0;
+  }
+
+  .resize-handle {
+    flex: none;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    touch-action: none;
+    user-select: none;
+  }
+
+  .resize-handle::after {
+    content: '';
+    position: absolute;
+    background: #46535b;
+    border-radius: 2px;
+  }
+
+  .sidebar-resize {
+    position: absolute;
+    z-index: 2;
+    top: 0;
+    bottom: 0;
+    left: calc(var(--sidebar-width) - 8px);
+    width: 8px;
+    cursor: col-resize;
+  }
+
+  .sidebar-resize::after {
+    top: calc(50% - 20px);
+    left: 3px;
+    width: 2px;
+    height: 40px;
+  }
+
+  .editor-resize {
+    position: relative;
+    height: 12px;
+    cursor: row-resize;
+  }
+
+  .editor-resize::after {
+    top: 5px;
+    left: calc(50% - 20px);
+    height: 2px;
+    width: 40px;
+  }
+
+  .resize-handle:hover, .resize-handle:focus-visible {
+    background: #00d4ff22;
+    outline: 1px solid #00d4ff;
+    outline-offset: -1px;
+  }
+
+  .resizing {
+    user-select: none;
   }
 
   .code-editor-group {
     display: flex;
-    flex: 1;
+    flex: none;
     flex-direction: column;
     min-height: 240px;
   }
@@ -780,6 +1096,7 @@
   /* ---- Canvas area ---- */
   .canvas-area {
     flex: 1;
+    min-width: 0;
     position: relative;
     overflow: hidden;
     background: #0a0a0a;

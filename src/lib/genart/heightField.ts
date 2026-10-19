@@ -172,5 +172,5 @@ export function createHeightField(options: HeightFieldOptions) {
       curves.push({ samples, evaluate: (t: number) => evaluate(x, ymin + (ymax - ymin) * t) });
     }
   }
-  return { curves, occludes };
+  return { curves, occludes, evaluate, bounds: { min: root.min, max: root.max } };
 }

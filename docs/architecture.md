@@ -39,16 +39,13 @@ gcode/
 │       ├── recorder.js             # Audio capture + frame buffering
 │       ├── imageTrace.js           # Marching-squares raster-to-vector tracing
 │       └── genart/                 # Built-in GenArt algorithm modules
-│           ├── attractors.js       # Strange attractors (Lorenz, Rössler, …)
-│           ├── cyclicCA.js         # Cyclic cellular automaton
 │           ├── harmonograph.js     # Damped two-pendulum parametric curves
 │           ├── codeArt.js          # In-app JavaScript art editor API
-│           ├── codeArtExamples.js  # Original scene-building examples
+│           ├── codeArtExamples.js  # Editable scenes, simulations, and attractors
 │           ├── lineArtRenderer.ts  # Scene projection and hidden-line removal
 │           ├── juliaContours.js      # Julia set contours
 │           ├── lsystem.js          # L-system turtle graphics
 │           ├── noiseContours.js    # Perlin noise iso-contours
-│           ├── reactionDiffusion.js # Gray-Scott reaction-diffusion
 │           ├── spaceFilling.js     # Space-filling L-system curves
 │           ├── spirograph.js       # Hypo/epi-cycloid curves
 │           ├── superformula.js     # Gielis superformula
@@ -178,6 +175,85 @@ and occlusion use the same piecewise-planar mesh. Parallel and crossed-grid
 styles share scene transforms, projection, clipping, and plotter output with
 the analytic shapes. Geometry tests cover self-occlusion, mixed scenes, invalid
 formulas, and transforms; Droplet Ripples has a browser screenshot baseline.
+
+### Extended Code Art scene pipeline
+
+- `codeArt.js` supplies immutable builders for drawing styles, custom 3D paths,
+  occlusion-only shapes, endpoint connectors, local mesh imports, sections,
+  voxel blocks, and analytic Boolean trees. Existing primitive defaults remain
+  surface grids. `assets` is injected alongside helpers when executing code.
+- `lineArtRenderer.ts` compiles each object's curves, local-coordinate ray
+  intersection/containment predicates, and transformed world bounds. Camera-
+  dependent silhouettes are generated in local space, including nonuniform
+  scale. Boolean ray roots partition the ray into intervals tested against the
+  combined volume; operand curves are trimmed to the result's boundary.
+  This does not generate a new mesh or all Boolean intersection seams.
+- `sceneSpatial.ts` provides a scene-level bounding hierarchy, so rays skip
+  unrelated objects instead of testing every solid. Limits are 12,000 objects,
+  16 Boolean nesting levels, one million aggregate mesh triangles,
+  100,000 source curves, 10 million visibility
+  samples, and 20,000 output paths / 500,000 output points.
+- `meshGeometry.ts` validates triangle meshes (100,000 triangles maximum),
+  parses OBJ / ASCII and binary STL, fits bounds, and provides a triangle BVH.
+  OBJ polygons use Three.js ear-clipping triangulation. Plane intersections
+  join into paths; voxelization uses triangle/cell overlap and fills closed
+  meshes via containment. Candidate-grid and work limits fail explicitly.
+- `functionSurface.ts` samples/clamps bounded function surfaces, constructs
+  side/base occlusion geometry, and preserves mesh diagonal crossings in
+  plotted curves. NaN is rejected; signed infinity clamps to the Z bounds.
+- `codeArt.worker.js` executes the complete user program and renderer off the
+  main thread. `codeArtWorkerClient.js` uses one worker per job with a 30-second
+  timeout, explicit transport/runtime errors, and termination on cancellation.
+  UI generation revisions reject stale results after edits, example/algorithm
+  changes, asset changes, and destruction. Workers do not provide a security
+  sandbox. Installed Gen Art plugins retain their existing main-thread path.
+- Local assets are kept in component memory, at most 20 MiB combined, and
+  cloned into the worker: text strings except STL `ArrayBuffer`s. They are not
+  uploaded or persisted. Errors/cancellation clear old preview/export paths.
+
+`fit: false` preserves perspective framing. Positive `aspect` fits the camera
+rectangle into square plot coordinates without distortion. Optional near/far
+planes clip camera-space depth. Existing auto-fit behavior remains the default.
+Geometry tests cover each API and every example; browser tests cover worker
+cancellation/recovery, stale results, local imports, and G-code handoff. Visual
+baselines cover original scenes and selected new drawing/mesh/Boolean studies.
+
+### In-app example guides
+
+`GenArt.svelte` provides pointer-captured and keyboard-accessible resize
+handles for sidebar width and editor height. The `gcode-genart-layout` local
+storage record holds separate Code Art/other algorithm sidebar widths and the
+editor height. Restored dimensions are validated; read/write errors are visible
+in the sidebar. A layout ResizeObserver clamps the displayed width to preserve
+preview space without overwriting the user's preferred width. The existing
+canvas ResizeObserver redraws current paths without generating again.
+
+Reaction-Diffusion, Cyclic CA, and Strange Attractors are no longer registered
+as built-in plugins. Their complete algorithms and former presets are editable
+programs in `codeArtExamples.js`, executed through the same worker and output
+validation as other Code Art. The `contours(field, size, threshold)` API validates
+square scalar grids and reuses `_marchingSquares.js`; no simulation-specific
+runtime API is needed. Grid examples use the shared `random(seed)` helper,
+which intentionally has a different sequence from the former plugin PRNG.
+Example metadata `dimension: 2` selects normalized-coordinate framing help
+instead of attempting to read a camera from the source.
+
+`codeArtExampleHelp.js` holds structured documentation for all bundled examples:
+overview, source-aligned walkthrough excerpts, numeric/setting explanations,
+experiments, and pitfalls. Mesh concepts are shared across the three mesh
+studies; 3D camera values are read from each scene example's source. The original source
+is displayed directly from `codeArtExamples.js`, never copied into help content.
+Tests require guide coverage for every example, matching excerpts/parameter
+references, and an entry covering every numeric literal.
+
+`GenArtExampleHelp.svelte` presents this content in a right-side native dialog
+styled as a wide drawer, with a fixed header, independent guide selector,
+section navigation, and numbered read-only source. Walkthrough buttons jump to
+the matching source line. Keyboard focus stays in the drawer; Close/Escape
+restore focus to its launcher. The drawer uses scrollable code/tables and fills
+the width on narrow screens. Browsing help never changes the editor, loaded
+example, generated output, or asset state. Browser tests enforce these
+non-destructive interactions and keyboard/mobile behavior.
 
 ---
 

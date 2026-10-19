@@ -33,6 +33,22 @@
   ].map(label => ({ label, type: 'keyword' }));
 
   const artHelpers = [
+    ...[
+      ['solid.cone', 'solid.cone({ detail: 8 }).draw("silhouette")', 'Create a capped cone'],
+      ['solid.cylinderBetween', 'solid.cylinderBetween([0,0,0], [0,0,1], { radius: 0.1, draw: "silhouette" })', 'Connect two 3D points'],
+      ['solid.coneBetween', 'solid.coneBetween([0,0,0], [0,0,1], { radius: 0.3, draw: "silhouette" })', 'Cone from base to tip'],
+      ['solid.union', 'solid.union(${shapeA}, ${shapeB})', 'Combine solid volumes'],
+      ['solid.intersection', 'solid.intersection(${shapeA}, ${shapeB})', 'Keep overlapping volume'],
+      ['solid.difference', 'solid.difference(${body}, ${cut})', 'Subtract solid volumes'],
+      ['solid.function', 'solid.function({ x: [-2,2], y: [-2,2], z: [-4,1], height: (x,y) => -1/(x*x+y*y) })', 'Bounded function surface'],
+      ['mesh.from', 'mesh.from({ vertices: ${vertices}, faces: ${faces} })', 'Create a triangle mesh'],
+      ['mesh.obj', 'mesh.obj(assets["${model.obj}"]).fit()', 'Import a local OBJ mesh'],
+      ['mesh.stl', 'mesh.stl(assets["${model.stl}"]).fit()', 'Import ASCII or binary STL'],
+      ['paths3d', 'paths3d(${[[[0,0,0],[1,0,1]]]})', 'Draw 3D polylines with scene occlusion'],
+      ['latLng', 'latLng(${latitude}, ${longitude})', 'Latitude/longitude to a unit sphere point'],
+      ['random', 'random(${42})', 'Create a seeded random-number function'],
+      ['contours', 'contours(${field}, ${size}, ${0.5})', 'Extract 2D contour paths from a square scalar grid'],
+    ].map(([label, snippet, detail]) => snippetCompletion(snippet, { label, detail, type: 'function' })),
     snippetCompletion('solid.heightfield({ x: [-2, 2], y: [-2, 2], lines: 70, samples: 160, style: "parallel", height: (x, y) => Math.cos(8 * Math.hypot(x, y)) * 0.2 })', {
       label: 'solid.heightfield',
       detail: 'Create a 3D surface from height(x, y)',
@@ -135,7 +151,16 @@
                   torus: true,
                   cylinder: true,
                   heightfield: true,
+                  cone: true,
+                  cylinderBetween: true,
+                  coneBetween: true,
+                  union: true,
+                  intersection: true,
+                  difference: true,
+                  function: true,
                 },
+                mesh: { from: true, obj: true, stl: true },
+                assets: {},
               }),
             ],
           }),
@@ -180,7 +205,7 @@
 <style>
   .code-editor {
     flex: 1;
-    min-height: 220px;
+    min-height: 0;
     width: 100%;
     overflow: hidden;
     border: 1px solid #30383d;
