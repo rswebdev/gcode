@@ -113,7 +113,12 @@ Streams G-code to a GRBL plotter via USB Serial (Chrome/Edge only; requires HTTP
 
 ## Gen Art tab — generative art
 
-Generates mathematical art as 2D plotter paths from 10 built-in algorithms.
+Generates mathematical art as 2D plotter paths from 11 built-in algorithms, including a syntax-highlighted JavaScript editor with completions, transformable 3D scene objects, 2D path helpers, and loadable scene examples.
+
+Code Art also supports mathematical **height fields**: define `height(x, y)`
+to draw ripples, terrain, or waves as parallel lines or crossed grids, with
+hidden-line removal and G-code export. Load **Droplet ripples** below the editor
+for a ready-to-run example.
 
 ### Built-in algorithms
 
@@ -148,6 +153,13 @@ Custom algorithms can be installed at runtime via the [GenArt Plugin API](docs/g
 | [GenArt Plugin API](docs/genart-plugin-api.md) | Developers | How to write and install custom generative art algorithms |
 | [Visualization Plugin API](docs/viz-plugin-api.md) | Developers | How to write and install custom 3D visualization shapes |
 | [Architecture](docs/architecture.md) | Contributors | Codebase structure, coordinate systems, key modules |
+
+## Acknowledgments
+
+Code Art's 3D scene-building approach is inspired by
+[fogleman/ln](https://github.com/fogleman/ln), Fogleman's Go line-art engine.
+The TypeScript renderer in this project is an independent implementation and
+does not port `ln` source code.
 
 ---
 

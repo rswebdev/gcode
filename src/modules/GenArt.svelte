@@ -21,20 +21,26 @@
   import * as spirograph    from '../lib/genart/spirograph.js';
   import * as juliaContours from '../lib/genart/juliaContours.js';
   import * as spaceFilling  from '../lib/genart/spaceFilling.js';
+  import * as codeArt       from '../lib/genart/codeArt.js';
+  import { codeArtExamples } from '../lib/genart/codeArtExamples.js';
+  import GenArtCodeEditor from './GenArtCodeEditor.svelte';
 
-  const BUILTIN = [rdiff, noiseContours, cyclicCA, superformula, lsystem, attractors, harmonograph, spirograph, juliaContours, spaceFilling];
+  const BUILTIN = [rdiff, noiseContours, cyclicCA, superformula, lsystem, attractors, harmonograph, spirograph, juliaContours, spaceFilling, codeArt];
 
   // ---------------------------------------------------------------------------
   // State
   // ---------------------------------------------------------------------------
 
   let canvas;
-  let selectedId   = 'reactiondiff';
+  let selectedId   = 'code-art';
   let paramsByAlg  = {};          // { [algId]: { [paramId]: value } }
   let currentPaths = [];
   let generating   = false;
   let genError     = '';
   let autoGen      = false;
+  let codeSource   = codeArt.DEFAULT_CODE;
+  let codeSaveError = '';
+  let selectedCodeExample = codeArtExamples[0].id;
 
   // Plugin panel
   let pluginPanelOpen = false;
@@ -53,6 +59,11 @@
 
   // Restore persisted plugins on mount
   onMount(async () => {
+    try {
+      codeSource = localStorage.getItem('gcode-genart-code') ?? codeArt.DEFAULT_CODE;
+    } catch (err) {
+      codeSaveError = `Could not load saved code: ${err.message ?? String(err)}`;
+    }
     await restoreGenartPlugins();
     _setupResizeObserver();
   });
@@ -64,6 +75,32 @@
   // Re-render when this tab becomes active (canvas may have been 0-size before)
   $: if ($activeTab === 'genart') {
     tick().then(() => _renderPaths(currentPaths));
+  }
+
+  function saveCode() {
+    try {
+      localStorage.setItem('gcode-genart-code', codeSource);
+      codeSaveError = '';
+    } catch (err) {
+      codeSaveError = `Could not save code: ${err.message ?? String(err)}`;
+    }
+  }
+
+  function handleCodeChange(value) {
+    codeSource = value;
+    saveCode();
+    _scheduleAutoGen();
+  }
+
+  function loadCodeExample() {
+    const example = codeArtExamples.find(item => item.id === selectedCodeExample);
+    if (!example) throw new Error(`Unknown Code Art example: ${selectedCodeExample}`);
+    codeSource = example.code;
+    saveCode();
+    genError = '';
+    currentPaths = [];
+    _renderPaths([]);
+    _scheduleAutoGen();
   }
 
   // ---------------------------------------------------------------------------
@@ -218,7 +255,10 @@
       // Yield to browser to show spinner, then compute
       await tick();
       await new Promise(resolve => setTimeout(resolve, 0));
-      const p = paramsByAlg[selectedId] ?? {};
+      const p = {
+        ...(paramsByAlg[selectedId] ?? {}),
+        ...(selectedId === codeArt.id ? { code: codeSource } : {}),
+      };
       const paths = selected.generate(p);
       currentPaths = paths;
       _renderPaths(paths);
@@ -287,7 +327,7 @@
 <!-- =========================================================
      Layout: sidebar left + canvas right
      ========================================================= -->
-<div class="genart-wrap">
+<div class="genart-wrap" class:code-mode={selectedId === codeArt.id}>
 
   <!-- Sidebar -->
   <aside class="sidebar">
@@ -322,6 +362,36 @@
 
     {#if genError}
       <p class="error-msg">{genError}</p>
+    {/if}
+
+    {#if selectedId === codeArt.id}
+      <section class="sidebar-group code-editor-group">
+        <label class="section-label" for="genart-code">Art code</label>
+        <GenArtCodeEditor value={codeSource} onChange={handleCodeChange} />
+        <div class="code-api">
+          <strong>API</strong>
+          <code>scene().add(solid.sphere(...)).render(camera)</code>
+          <code>solid.heightfield({"{ height: (x, y) => ..., style: 'parallel' }"})</code>
+          <code>shape.translate/rotate/scale(...)</code>
+          <code>sphere, cube, torus, cylinder(options)</code>
+          <code>circle(options), polyline(points, options)</code>
+        </div>
+        <div class="example-picker">
+          <label class="section-label" for="code-art-example">Examples</label>
+          <div class="example-picker-controls">
+            <select id="code-art-example" bind:value={selectedCodeExample}>
+              {#each codeArtExamples as example (example.id)}
+                <option value={example.id}>{example.label}</option>
+              {/each}
+            </select>
+            <button on:click={loadCodeExample}>Load</button>
+          </div>
+          <span class="example-credit">Original studies inspired by fogleman/ln</span>
+        </div>
+        {#if codeSaveError}
+          <p class="error-msg">{codeSaveError}</p>
+        {/if}
+      </section>
     {/if}
 
     <hr class="divider" />
@@ -457,6 +527,52 @@
     overflow-x: hidden;
   }
 
+  .code-mode .sidebar {
+    width: 390px;
+    max-width: 440px;
+  }
+
+  .code-editor-group {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    min-height: 240px;
+  }
+
+  .code-api {
+    display: grid;
+    gap: 3px;
+    margin-top: 7px;
+    color: #858f94;
+    font-size: 10px;
+  }
+
+  .code-api code {
+    overflow-wrap: anywhere;
+    font: inherit;
+  }
+
+  .example-picker {
+    display: grid;
+    gap: 4px;
+    margin-top: 10px;
+  }
+
+  .example-picker-controls {
+    display: flex;
+    gap: 6px;
+  }
+
+  .example-picker-controls select {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .example-credit {
+    color: #657076;
+    font-size: 10px;
+  }
+
   .sidebar-group {
     padding: 6px 12px;
   }
@@ -558,7 +674,10 @@
   }
 
   /* ---- Spacer ---- */
-  .spacer { flex: 1; }
+  .spacer {
+    flex: 1;
+    pointer-events: none;
+  }
 
   /* ---- Plugin panel ---- */
   .plugin-section {

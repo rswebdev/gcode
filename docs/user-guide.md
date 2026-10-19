@@ -236,7 +236,7 @@ The Gen Art tab generates mathematical art as plotter-ready 2D paths.
 
 ### Algorithm dropdown
 
-Select from 10 built-in algorithms or any user-installed plugins.
+Select from 11 built-in algorithms or any user-installed plugins.
 
 | Algorithm | Description |
 |---|---|
@@ -250,6 +250,7 @@ Select from 10 built-in algorithms or any user-installed plugins.
 | **Spirograph** | Hypo- and epi-cycloid curves with ellipse stretch and multi-layer support |
 | **Julia Set** | Julia set contours at configurable c values and presets |
 | **Space Filling** | Hilbert / Gosper / other space-filling L-system curves |
+| **Code Art** | Write JavaScript using the built-in 3D primitives and 2D path helpers |
 
 ### Parameter controls
 
@@ -267,6 +268,123 @@ Algorithms that export a `guide()` function (currently **Spirograph**) show a di
 ### Generate
 
 Click **Generate** to run the algorithm and display the paths on the canvas.
+
+**Code Art** opens an in-app JavaScript editor with syntax highlighting, line
+numbers, code folding, bracket matching, and standard undo/redo and indentation
+shortcuts. It offers JavaScript keyword, snippet, and local-variable
+completion, as well as suggestions for the provided art helpers. It does not
+provide full IntelliSense or type-aware suggestions. Write code that returns an
+array of paths, then click **Generate** to run it. Code is saved in this
+browser's local storage as you edit. The direct shape and drawing helpers are:
+
+| Function | Description |
+|---|---|
+| `sphere(options)`, `cube(options)`, `torus(options)`, `cylinder(options)` | Return visible surface-grid paths with optional `detail`, `azimuth`, `elevation`, and `fov` settings |
+| `combine(...pathGroups)` | Join path arrays into one result |
+| `transform(paths, options)` | Scale, rotate (degrees), and translate paths with `translateX` / `translateY` |
+| `circle(options)` | Draw a circle with optional `x`, `y`, `radius`, and `steps` |
+| `polyline(points, options)` | Draw points as `[x, y]` pairs or `{nx, ny}` objects; set `close: true` to close the path |
+
+For composed 3D artwork, `solid` creates transformable shapes, and a scene
+renders them together through one camera and one hidden-line pass:
+
+| Scene API | Description |
+|---|---|
+| `scene().add(...shapes)` | Add one or more `solid.sphere()`, `solid.cube()`, `solid.torus()`, or `solid.cylinder()` objects |
+| `solid.heightfield(options)` | Create a transformable surface from a `height(x, y)` function, drawn as parallel lines or a grid |
+| `shape.translate(x, y, z)` | Move a shape in world-space units; also accepts a three-number array |
+| `shape.rotate(x, y, z)` | Rotate in degrees around X, Y, then Z; also accepts a three-number array |
+| `shape.scale(s)` or `shape.scale(x, y, z)` | Apply uniform or per-axis scale |
+| `scene.render(camera)` | Render visible paths with optional `position`, `target`, `up`, and `fov` camera settings |
+
+Shapes have a base size of approximately 2 world units. The renderer fits the
+visible scene to the plot area. An omitted camera uses a default perspective
+view aimed at the origin. Scenes can contain up to 20 objects. Rotations are
+applied in X, Y, Z order.
+
+```js
+const sculpture = scene().add(
+  solid.sphere({ detail: 8 }).scale(0.8).translate(-0.9, 0, 0),
+  solid.torus({ detail: 8 }).rotate(65, 0, 0).translate(0.9, 0, 0.2),
+  solid.cube({ detail: 7 }).scale(0.35).rotate(20, 20, 0).translate(0, 0.8, 0)
+);
+
+return sculpture.render({
+  position: [4.5, -6, 4],
+  target: [0, 0, 0],
+  up: [0, 0, 1],
+  fov: 45
+});
+```
+
+Direct shape helpers such as `sphere(options)` still return rendered 2D paths
+for simple single-object sketches.
+
+#### Height fields: ripples, terrain, and waves
+
+Use `solid.heightfield()` to turn a mathematical height function into a 3D
+surface. It supports the same transforms, shared camera, hidden-line removal,
+and G-code handoff as other scene shapes:
+
+```js
+const water = solid.heightfield({
+  x: [-2, 2],
+  y: [-2, 2],
+  lines: 90,
+  samples: 200,
+  style: 'parallel',
+  height(x, y) {
+    const r = Math.hypot(x, y);
+    return 0.24 * Math.cos(11 * r) * Math.exp(-0.9 * r)
+      + 0.7 * Math.exp(-30 * r * r);
+  },
+});
+return scene().add(water).render({
+  position: [3, -6, 3], target: [0, 0, 0], up: [0, 0, 1], fov: 45,
+});
+```
+
+| Option | Default | Meaning |
+|---|---|---|
+| `height(x, y)` | Required | Return a finite numeric height; use a deterministic function without side effects |
+| `x`, `y` | `[-1, 1]` | Two increasing finite bounds on each axis |
+| `lines` | `70` | Number of drawn lines per direction, integer from 2 to 200 |
+| `samples` | `160` | Mesh subdivisions per axis, integer from 8 to 256 |
+| `style` | `'parallel'` | Lines along X; use `'grid'` to add lines along Y |
+
+`lines` controls ink density; `samples` controls surface accuracy and processing
+cost. Heights are sampled once per mesh vertex during generation, then line
+positions and visibility use that same triangle mesh to avoid self-occlusion
+artifacts. Increase `samples` for narrow peaks or closely spaced ripples.
+Height fields are open, two-sided sheets, not closed volumes with side walls.
+Peaks can hide more distant lines, and the surface can occlude other scene
+objects (and vice versa). Invalid options, non-finite heights, and formula
+errors are reported by the editor's generation error display.
+
+The scene-building approach is inspired by
+[fogleman/ln](https://github.com/fogleman/ln), Fogleman's Go line-art engine.
+This app's TypeScript renderer is an independent implementation, not a port of
+its source code.
+
+Simple 2D example:
+
+```js
+const body = sphere({ detail: 8, azimuth: 35, elevation: 25 });
+const orbit = circle({ radius: 0.48, steps: 180 });
+return combine(body, orbit);
+```
+
+The **Examples** selector below the editor includes original Cube Study,
+Sphere Study, Orbital Sculpture, Helix Tower, Courtyard, and Droplet Ripples programs. Choose
+one and click **Load** to replace the editor contents; loading does not run
+the code until you click **Generate**.
+
+These example studies take inspiration from the scene and primitive examples
+in [fogleman/ln](https://github.com/fogleman/ln), but their code is original
+and written for this app's API.
+
+Code runs in the app's main browser context, like installed Gen Art plugins.
+Only run code you trust.
 
 Enable **Auto-generate** to regenerate automatically 350 ms after any param change.
 

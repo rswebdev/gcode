@@ -13,7 +13,7 @@ This document describes the codebase structure, key design decisions, and how th
 | 3D rendering | Three.js 0.183 |
 | Testing | Playwright |
 | Linting | ESLint 10 + eslint-plugin-svelte |
-| Type checking | svelte-check (JSDoc types, no TypeScript source files) |
+| Type checking | svelte-check (JSDoc types and a TypeScript line-art renderer) |
 
 ---
 
@@ -29,7 +29,8 @@ gcode/
 │   │   ├── WaveRecorder.svelte     # Wave tab — audio capture + 3D preview
 │   │   ├── GcodeHandler.svelte     # G-code tab — preview, export, playback
 │   │   ├── SerialTransmission.svelte # Serial tab — GRBL connection
-│   │   └── GenArt.svelte           # Gen Art tab — generative art + plugin system
+│   │   ├── GenArt.svelte           # Gen Art tab — generative art + plugin system
+│   │   └── GenArtCodeEditor.svelte # CodeMirror JavaScript art editor
 │   └── lib/                        # Shared libraries
 │       ├── gcode.js                # G-code generation, NDC↔paper mapping, path sort/dedup
 │       ├── visualizer.js           # Three.js scene + built-in visualization shapes
@@ -41,7 +42,10 @@ gcode/
 │           ├── attractors.js       # Strange attractors (Lorenz, Rössler, …)
 │           ├── cyclicCA.js         # Cyclic cellular automaton
 │           ├── harmonograph.js     # Damped two-pendulum parametric curves
-│           ├── juliaContours.js    # Julia set contours
+│           ├── codeArt.js          # In-app JavaScript art editor API
+│           ├── codeArtExamples.js  # Original scene-building examples
+│           ├── lineArtRenderer.ts  # Scene projection and hidden-line removal
+│           ├── juliaContours.js      # Julia set contours
 │           ├── lsystem.js          # L-system turtle graphics
 │           ├── noiseContours.js    # Perlin noise iso-contours
 │           ├── reactionDiffusion.js # Gray-Scott reaction-diffusion
@@ -152,6 +156,28 @@ Reactive rules:
 - `selectedId` is reset to `algorithms[0].id` if the selected plugin is uninstalled.
 - Params are merged (defaults + stored values) whenever the selected algorithm changes or a plugin is reinstalled.
 - Canvas re-renders via `_renderPaths(currentPaths)` which draws guide paths first (if `selected.guide` exists), then main paths.
+
+`GenArtCodeEditor.svelte` provides JavaScript syntax highlighting, line
+numbers, folding, editing keymaps, built-in JavaScript completions, and
+suggestions for the Code Art helper API. It does not use type-aware
+IntelliSense.
+
+The Code Art renderer tests camera-to-curve rays against solids in each object's
+local coordinates, including rotated and non-uniformly scaled objects. Cubes,
+spheres, and capped cylinders use analytic intersection intervals; tori use
+the stationary points of the ray/torus quartic to detect interior intersections.
+Curve samples and visibility boundaries are evaluated on the original surfaces,
+not on chords or a pixel depth buffer. Geometry tests require complete visible
+cube grids and check occlusion and torus holes; the courtyard preview also has
+a Playwright visual regression snapshot.
+
+Height fields sample a user-supplied height function into a regular triangle
+mesh (up to 256 subdivisions per axis). A spatial bounds hierarchy accelerates
+two-sided ray/triangle visibility tests in local coordinates. Both drawn curves
+and occlusion use the same piecewise-planar mesh. Parallel and crossed-grid
+styles share scene transforms, projection, clipping, and plotter output with
+the analytic shapes. Geometry tests cover self-occlusion, mixed scenes, invalid
+formulas, and transforms; Droplet Ripples has a browser screenshot baseline.
 
 ---
 
