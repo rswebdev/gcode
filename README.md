@@ -113,22 +113,50 @@ Streams G-code to a GRBL plotter via USB Serial (Chrome/Edge only; requires HTTP
 
 ## Gen Art tab — generative art
 
-Generates mathematical art as 2D plotter paths from 10 built-in algorithms.
+Generates mathematical art as 2D plotter paths from 8 built-in algorithms, including a syntax-highlighted JavaScript editor with completions, transformable 3D scene objects, 2D path helpers, and loadable examples.
+
+Code Art also supports mathematical **height fields**: define `height(x, y)`
+to draw ripples, terrain, or waves as parallel lines or crossed grids, with
+hidden-line removal and G-code export. Load **Droplet ripples** below the editor
+for a ready-to-run example.
+
+Scene tools include edge/silhouette drawing, cones and point-to-point
+connectors, custom 3D paths, occluder-only objects, analytic solid Booleans,
+bounded function surfaces, local OBJ/STL import, mesh slicing, and voxelization.
+Code Art generation runs in a cancellable worker and an SES compartment with
+only its geometry helpers and uploaded assets available to editor code. This
+limits browser capabilities but is not an OS-level security boundary or a
+resource-exhaustion guarantee. The example selector includes city, bead, graph, globe,
+mesh, and Boolean studies. See the [Code Art guide](docs/user-guide.md#generate)
+for APIs, resource limits, and supported geometry.
+
+**Reaction-Diffusion**, **Cyclic CA**, and **Strange Attractors** now live under
+Code Art → **Examples**, rather than as standalone algorithms. Load an example
+to edit its complete simulation, coefficients, presets, and plotting code.
+Reaction-Diffusion retains Spots/Maze/Fingerprints/Coral; Strange Attractors
+retains Clifford/De Jong/Lorenz/Rössler/Halvorsen. The shared
+`contours(field, size, threshold)` helper converts scalar grids into 2D paths.
+
+Every Code Art example includes an **in-app Help drawer** with a code
+walkthrough, explanations of the numbers and camera settings, a numbered source
+reference, experiments to try, and plotting notes. Browse guides without
+replacing or running your editor code.
+
+Drag the sidebar's right divider to adjust its width and the handle below
+the editor to adjust its height. Panel sizes are saved in this browser.
 
 ### Built-in algorithms
 
 | Algorithm | Description |
 |---|---|
-| **Reaction Diffusion** | Gray-Scott simulation; presets: Spots, Maze, Fingerprints, Coral |
 | **Noise Contours** | Perlin noise iso-contours |
-| **Cyclic CA** | Cyclic cellular automaton boundaries |
 | **Superformula** | Gielis polar superformula |
 | **L-System** | Hilbert, Moore, Gosper, Peano space-filling curves |
-| **Strange Attractors** | Lorenz, Rössler, Dadras, Chen, … |
 | **Harmonograph** | Damped two-pendulum parametric curves |
 | **Spirograph** | Hypo/epi-cycloid with ellipse stretch, multi-layer, guide overlay |
 | **Julia Set Contours** | Julia set iso-contours at configurable c values |
 | **Space Filling** | L-system turtle graphics |
+| **Code Art** | Editable 2D simulations, chaotic attractors, and 3D scenes |
 
 Custom algorithms can be installed at runtime via the [GenArt Plugin API](docs/genart-plugin-api.md).
 
@@ -148,6 +176,13 @@ Custom algorithms can be installed at runtime via the [GenArt Plugin API](docs/g
 | [GenArt Plugin API](docs/genart-plugin-api.md) | Developers | How to write and install custom generative art algorithms |
 | [Visualization Plugin API](docs/viz-plugin-api.md) | Developers | How to write and install custom 3D visualization shapes |
 | [Architecture](docs/architecture.md) | Contributors | Codebase structure, coordinate systems, key modules |
+
+## Acknowledgments
+
+Code Art's 3D scene-building approach is inspired by
+[fogleman/ln](https://github.com/fogleman/ln), Fogleman's Go line-art engine.
+The TypeScript renderer in this project is an independent implementation and
+does not port `ln` source code.
 
 ---
 
