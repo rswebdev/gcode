@@ -506,12 +506,16 @@ from its target, and `up` must be non-zero and not parallel to the viewing
 direction. Invalid camera bases raise an actionable error. For a straight-down
 Z view, use an up vector such as `[0,1,0]` instead of the default `[0,0,1]`.
 
-Code Art runs in a dedicated Web Worker. **Cancel** terminates even a program
-stuck in an infinite loop. Edits, loading an example, changing algorithms, or
-changing assets cancel stale work and clear its old output; generation errors
-and cancellation cannot leave an old drawing available for export. Jobs time
-out after 30 seconds. Code remains ordinary JavaScript with worker capabilities;
-this is not a security sandbox, so only run code you trust.
+Code Art runs in a dedicated Web Worker and an SES compartment. Editor code is
+given only the Code Art geometry helpers and uploaded assets; browser APIs such
+as `fetch`, the DOM, and storage are not endowed. **Cancel** terminates even a
+program stuck in an infinite loop. Edits, loading an example, changing
+algorithms, or changing assets cancel stale work and clear its old output;
+generation errors and cancellation cannot leave an old drawing available for
+export. Jobs time out after 30 seconds. This is defense in depth, not an
+OS-level security boundary: resource exhaustion remains possible, and the
+separate plugin systems still run with broader app privileges. Only run code
+you trust.
 
 Resource limits are explicit: 12,000 objects, Boolean nesting depth 16,
 one million mesh triangles across the scene (including height fields),

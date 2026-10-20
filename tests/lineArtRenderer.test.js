@@ -2,7 +2,7 @@ import { test, expect } from '@playwright/test';
 import { Vector3, Euler } from 'three';
 import { renderLineArtScene } from '../src/lib/genart/lineArtRenderer.ts';
 import { createHeightField } from '../src/lib/genart/heightField.ts';
-import { generate } from '../src/lib/genart/codeArt.js';
+import { generate } from '../src/lib/genart/codeArtSandbox.js';
 import { codeArtExamples } from '../src/lib/genart/codeArtExamples.js';
 
 function object(shape, overrides = {}) {

@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { generate } from '../src/lib/genart/codeArt.js';
+import { generate } from '../src/lib/genart/codeArtSandbox.js';
 import { createSceneIndex } from '../src/lib/genart/sceneSpatial.ts';
 import { createFunctionSurface } from '../src/lib/genart/functionSurface.ts';
 import { codeArtExamples } from '../src/lib/genart/codeArtExamples.js';

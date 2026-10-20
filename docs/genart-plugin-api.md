@@ -197,7 +197,11 @@ To uninstall: click the **×** next to the plugin name in the Plugins panel.
 
 ## Security
 
-Plugin code executes in the **main app context** with full origin privileges (localStorage, network, DOM). This is intentional for a local-only developer tool where the user installs their own code. Never install plugin code from untrusted sources.
+Plugin code executes in the **main app context** with full origin privileges
+(localStorage, network, DOM). This is intentional for a local-only developer
+tool where the user installs their own code. The Code Art editor's worker
+compartment does not apply to installed plugins. Local-only use does not remove
+these privileges; never install plugin code from untrusted sources.
 
 ---
 

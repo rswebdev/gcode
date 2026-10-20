@@ -322,7 +322,11 @@ const API = Object.freeze({
   random,
 });
 
-function validatePaths(paths) {
+export function createAPI() {
+  return API;
+}
+
+export function validatePaths(paths) {
   if (!Array.isArray(paths)) throw new TypeError('Your code must return an array of paths');
   if (paths.length > 20000) throw new RangeError('Output exceeds the 20,000 path limit');
 
@@ -338,18 +342,4 @@ function validatePaths(paths) {
     }
   }
   return paths;
-}
-
-export function generate({ code = DEFAULT_CODE, assets = {} } = {}) {
-  if (typeof code !== 'string' || !code.trim()) {
-    throw new TypeError('Enter JavaScript code that returns an array of paths');
-  }
-  if (code.length > 100000) throw new RangeError('Code exceeds the 100,000 character limit');
-
-  const execute = new Function(
-    'api',
-    'assets',
-    `"use strict";\nconst { sphere, cube, torus, cylinder, combine, transform, circle, polyline, contours, scene, solid, mesh, paths3d, latLng, random } = api;\n${code}`,
-  );
-  return validatePaths(execute(API, assets));
 }

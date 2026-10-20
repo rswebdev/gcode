@@ -123,8 +123,10 @@ for a ready-to-run example.
 Scene tools include edge/silhouette drawing, cones and point-to-point
 connectors, custom 3D paths, occluder-only objects, analytic solid Booleans,
 bounded function surfaces, local OBJ/STL import, mesh slicing, and voxelization.
-Code Art generation runs in a cancellable worker, with spatial acceleration
-for larger scenes. The example selector includes city, bead, graph, globe,
+Code Art generation runs in a cancellable worker and an SES compartment with
+only its geometry helpers and uploaded assets available to editor code. This
+limits browser capabilities but is not an OS-level security boundary or a
+resource-exhaustion guarantee. The example selector includes city, bead, graph, globe,
 mesh, and Boolean studies. See the [Code Art guide](docs/user-guide.md#generate)
 for APIs, resource limits, and supported geometry.
 

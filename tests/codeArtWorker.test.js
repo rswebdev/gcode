@@ -74,6 +74,29 @@ test('real worker infinite loop is cancellable and a new generation succeeds', a
   await expect(ui.error).toHaveCount(0);
 });
 
+test('real worker confines code to the explicit Code Art capabilities', async ({ page }) => {
+  const ui = await openCodeArt(page);
+  await ui.editor.fill(`
+    const unavailable = ['fetch', 'XMLHttpRequest', 'WebSocket', 'document', 'window',
+      'localStorage', 'indexedDB', 'importScripts', 'self', 'postMessage', 'Worker',
+      'navigator', 'location', 'crypto', 'setTimeout'];
+    if (unavailable.some(name => name in globalThis)) throw new Error('Unexpected worker global');
+    for (const value of [{}, solid.sphere(), random(1)]) {
+      let dynamicConstructorBlocked = false;
+      try {
+        value.constructor.constructor('return globalThis')();
+      } catch (error) {
+        dynamicConstructorBlocked = error.name === 'TypeError';
+      }
+      if (!dynamicConstructorBlocked) throw new Error('Dynamic constructor escape was not blocked');
+    }
+    return polyline([[0, 0], [1, 1]]);
+  `);
+  await ui.generate.click();
+  await expect(ui.send).toBeEnabled();
+  await expect(ui.error).toHaveCount(0);
+});
+
 test('real worker errors are visible and stale jobs are discarded on edits, examples, and switching', async ({ page }) => {
   const ui = await openCodeArt(page);
   await ui.editor.fill('throw new Error("intentional worker error");');

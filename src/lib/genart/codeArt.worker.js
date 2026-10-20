@@ -1,4 +1,4 @@
-import { generate } from './codeArt.js';
+import { generate } from './codeArtSandbox.js';
 
 globalThis.onmessage = ({ data }) => {
   try {

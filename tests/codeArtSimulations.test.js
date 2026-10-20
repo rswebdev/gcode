@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { generate } from '../src/lib/genart/codeArt.js';
+import { generate } from '../src/lib/genart/codeArtSandbox.js';
 import { codeArtExamples } from '../src/lib/genart/codeArtExamples.js';
 import { marchingSquares } from '../src/lib/genart/_marchingSquares.js';
 
