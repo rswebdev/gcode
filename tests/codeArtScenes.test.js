@@ -113,6 +113,36 @@ test('camera framing preserves field of view and clips near/far planes', () => {
   expect(() => render(`solid.cube()`, `{near:2,far:1}`)).toThrow(/far/);
 });
 
+test('degenerate camera bases report actionable range errors', () => {
+  const cases = [
+    ['{position:[1,2,3],target:[1,2,3]}', /change the camera position/],
+    ['{position:[0,0,6],up:[0,0,1]}', /change the camera position or up vector/],
+    ['{position:[0,0,-6],up:[0,0,2]}', /change the camera position or up vector/],
+    ['{position:[2,2,2],up:[1,1,1]}', /parallel/],
+    ['{elevation:90}', /parallel/],
+    ['{up:[0,0,0]}', /change the up vector/],
+  ];
+  for (const [view, message] of cases) {
+    expect(() => render('solid.cube()', view)).toThrow(RangeError);
+    expect(() => render('solid.cube()', view)).toThrow(message);
+  }
+  checkPaths(render('solid.cube()', '{position:[0,0,6],up:[0,1,0]}'));
+  checkPaths(render('solid.cube()', '{position:[2,2,2],up:[0,0,2]}'));
+});
+
+test('camera angles reject non-finite values before constructing the basis', () => {
+  for (const angle of ['azimuth', 'elevation']) {
+    for (const value of ['NaN', 'Infinity', '-Infinity']) {
+      for (const position of ['', 'position:[4,-6,4],']) {
+        const view = `{${position}${angle}:${value}}`;
+        expect(() => render('solid.cube()', view)).toThrow(RangeError);
+        expect(() => render('solid.cube()', view)).toThrow(/azimuth and elevation must be finite/);
+      }
+    }
+  }
+  checkPaths(render('solid.cube()', '{azimuth:0,elevation:0}'));
+});
+
 test('scene index prunes thousands of unrelated objects and supports empty scenes', () => {
   const items = Array.from({length:10000}, (_,i) => ({
     bounds:{min:[i*3,-1,-1],max:[i*3+1,1,1]}, id:i,

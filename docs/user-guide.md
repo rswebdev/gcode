@@ -501,6 +501,10 @@ Optional `aspect` (positive, default 1) fits the camera's rectangular frame into
 the square plot coordinates without stretching; `near` (default 0.01) and
 `far` (optional) clip by camera-space depth. Paths may extend outside the plot
 with `fit: false`; choose camera framing that keeps exported artwork in bounds.
+Camera `azimuth` and `elevation` must be finite. The camera position must differ
+from its target, and `up` must be non-zero and not parallel to the viewing
+direction. Invalid camera bases raise an actionable error. For a straight-down
+Z view, use an up vector such as `[0,1,0]` instead of the default `[0,0,1]`.
 
 Code Art runs in a dedicated Web Worker. **Cancel** terminates even a program
 stuck in an infinite loop. Edits, loading an example, changing algorithms, or

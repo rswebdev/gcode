@@ -227,9 +227,21 @@ function createCamera(camera: SceneCamera) {
     target[1] + 4.2 * Math.cos(el) * Math.sin(az),
     target[2] + 4.2 * Math.sin(el),
   ];
-  const forward = normalize(subtract(target, eye));
+  const direction = subtract(target, eye);
+  if (Math.hypot(...direction) < 1e-12) {
+    throw new RangeError('Camera position must differ from target; change the camera position');
+  }
+  const forward = normalize(direction);
   const upAxis = camera.up ?? WORLD_UP;
-  const right = normalize(cross(forward, upAxis));
+  const upLength = Math.hypot(...upAxis);
+  if (upLength < 1e-12) {
+    throw new RangeError('Camera up vector must be non-zero; change the up vector');
+  }
+  const rightAxis = cross(forward, scale(upAxis, 1 / upLength));
+  if (Math.hypot(...rightAxis) < 1e-12) {
+    throw new RangeError('Camera view direction must not be parallel to the up vector; change the camera position or up vector');
+  }
+  const right = normalize(rightAxis);
   const up = normalize(cross(right, forward));
 
   const project = (point: Vec3): ProjectedPoint | null => {
@@ -765,6 +777,9 @@ export function renderLineArtScene(objects: SceneObject[], cameraOptions: SceneC
     }
   }
   const fov = cameraOptions.fov ?? 45;
+  if (![cameraOptions.azimuth ?? 35, cameraOptions.elevation ?? 25].every(Number.isFinite)) {
+    throw new RangeError('Camera azimuth and elevation must be finite numbers');
+  }
   if (!Number.isFinite(fov) || fov <= 1 || fov >= 179) {
     throw new RangeError('Camera field of view must be between 1 and 179 degrees');
   }
