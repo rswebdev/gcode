@@ -55,7 +55,7 @@ The same seed and settings always produce the same output and the same plot.
 
 ### Shape
 
-Fifteen built-in visualization modes map audio frames to different 3D geometry. Custom shapes can be added via the **Plugin system** (see below).
+Ten built-in visualization modes map audio frames to different 3D geometry. Custom shapes can be added via the **Plugin system** (see below).
 
 | Shape | Description |
 |---|---|
@@ -69,6 +69,12 @@ Fifteen built-in visualization modes map audio frames to different 3D geometry. 
 | **Moiré** | Two offset families of concentric rings producing interference fringes |
 | **Heatmap** | Frequency spectrogram grid; amplitude controls circle radius per cell |
 | **Quantized Noise** | Joy Division ridges snapped to 8 amplitude bands; gap regions hatched |
+
+Quantized Noise accents follow the full-resolution boundaries of adjacent
+ridges at their actual 3D depths. Translucent colors do not write to the depth
+buffer; the opaque ridge faces still hide geometry behind them. Orbit the view
+to inspect these surfaces, or use **Advanced → Reset** to restore the shape's
+default camera.
 
 ### Recording
 

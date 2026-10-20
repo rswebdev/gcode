@@ -196,6 +196,17 @@ npm test         # Playwright end-to-end tests
 npm run build    # Production build
 ```
 
+Wave's live 3D canvas has screenshot coverage for all ten built-in shapes,
+including oblique and low-angle Quantized Noise views for fill/ridge alignment. These
+tests use seeded noise and a controlled animation clock; the separate
+projection screenshots cover the G-code preview.
+
+```bash
+npx playwright test tests/waveVisual.test.js tests/quantizedGeometry.test.js
+# After reviewing intentional visual changes, regenerate Wave baselines:
+npx playwright test tests/waveVisual.test.js --update-snapshots
+```
+
 **Commits must be GPG-signed.** See [Architecture](docs/architecture.md#contributing) for the full contributing guide.
 
 ---

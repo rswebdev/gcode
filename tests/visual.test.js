@@ -1,4 +1,4 @@
-// Visual regression tests for all 15 visualization shapes.
+// G-code projection regression tests for all ten visualization shapes.
 //
 // Strategy: record with a fixed seed, then project to the G-code preview
 // (Pattern → G-code). The 2D preview canvas is a static, deterministic
@@ -41,7 +41,7 @@ async function recordAndProject(page, shape, { seed = 42, maxFrames = SHAPE_MAX_
   await page.getByLabel('Shape').selectOption(shape);
 
   // Open the Advanced panel so we can reach the seed and frame controls.
-  await page.locator('.adv-toggle').click();
+  await page.getByRole('link', { name: /^Advanced/ }).click();
 
   // Fix the noise seed so output is deterministic across runs.
   const seedInput = page.getByLabel('Seed');
@@ -78,7 +78,7 @@ test('recording fills the requested frame count', async ({ page }) => {
   await page.goto('/');
   await page.waitForLoadState('networkidle');
   await page.getByLabel('Source').selectOption('noise');
-  await page.locator('.adv-toggle').click();
+  await page.getByRole('link', { name: /^Advanced/ }).click();
   await page.getByLabel('Max Frames').fill('8');
   await page.getByLabel('Max Frames').press('Tab');
   await page.getByRole('button', { name: 'Record' }).click();
