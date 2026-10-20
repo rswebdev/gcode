@@ -15,6 +15,7 @@
 
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { buildQuantizedGap } from './quantizedGeometry.js';
 
 // ---------------------------------------------------------------------------
 // Scene constants
@@ -932,17 +933,15 @@ function _rebuildQuantized(allFrames, isLive) {
   const N          = _toMono(allFrames[0]).length;
   const zSpacing   = SCENE_DEPTH / Math.max(cfg.maxFrames - 1, 1);
   const FLOOR_Y    = -8;
-  const SUB        = 64;
   const N_DIRS     = 8;
   const N_COLORS   = 3;
   const HATCH_STEP = 0.3;
   const PALETTE    = ['#e8732a', '#c45fa0', '#2ab8c4'];
   const QUANT_STEP = (4 * cfg.ampScale) / N_DIRS;
-  const dxSub      = SCENE_W / (SUB - 1);
+  const dx         = SCENE_W / (N - 1);
 
-  // Pre-compute quantized Y values (full resolution + subsampled)
+  // Use the same samples for strokes, occluders, and colored boundaries.
   const yRaw = [];
-  const ySub = [];
   for (let fi = 0; fi < F; fi++) {
     const data = _toMono(allFrames[fi]);
     const ys   = new Float32Array(N);
@@ -952,11 +951,6 @@ function _rebuildQuantized(allFrames, isLive) {
       ys[i]     = Math.abs(raw) < QUANT_STEP ? 0 : q;
     }
     yRaw.push(ys);
-    const sub = new Float32Array(SUB);
-    for (let s = 0; s < SUB; s++) {
-      sub[s] = ys[Math.floor(s * (N - 1) / (SUB - 1))];
-    }
-    ySub.push(sub);
   }
 
   // Step 1: occluder fill polygon + quantized wave stroke per frame (back-to-front)
@@ -966,9 +960,8 @@ function _rebuildQuantized(allFrames, isLive) {
 
     const sh = new THREE.Shape();
     sh.moveTo(-SCENE_W / 2, FLOOR_Y);
-    for (let s = 0; s < SUB; s++) {
-      const si = Math.floor(s * (N - 1) / (SUB - 1));
-      sh.lineTo((si / (N - 1)) * SCENE_W - SCENE_W / 2, ys[si]);
+    for (let i = 0; i < N; i++) {
+      sh.lineTo(i * dx - SCENE_W / 2, ys[i]);
     }
     sh.lineTo(SCENE_W / 2, FLOOR_Y);
 
@@ -999,11 +992,13 @@ function _rebuildQuantized(allFrames, isLive) {
   // Step 2: compute gap areas between adjacent frame pairs, pick top-N
   const gapAreas = [];
   for (let fi = 0; fi < F - 1; fi++) {
-    const yB = ySub[fi];
-    const yF = ySub[fi + 1];
+    const yB = yRaw[fi];
+    const yF = yRaw[fi + 1];
     let area = 0;
-    for (let s = 0; s < SUB; s++) area += Math.max(0, yB[s] - yF[s]);
-    gapAreas.push({ fi, area: area * dxSub });
+    for (let i = 0; i < N - 1; i++) {
+      area += (Math.max(0, yB[i] - yF[i]) + Math.max(0, yB[i + 1] - yF[i + 1])) * dx / 2;
+    }
+    gapAreas.push({ fi, area });
   }
   gapAreas.sort((a, b) => b.area - a.area);
 
@@ -1013,75 +1008,41 @@ function _rebuildQuantized(allFrames, isLive) {
     const { fi } = topGaps[k];
     if (fi + 1 >= F) continue;
     const color = new THREE.Color(PALETTE[k]);
-    const yB    = ySub[fi];
-    const yF    = ySub[fi + 1];
-    const z     = fi * zSpacing;
+    const { positions, hatches } = buildQuantizedGap(
+      yRaw[fi], yRaw[fi + 1], fi * zSpacing, (fi + 1) * zSpacing, SCENE_W, HATCH_STEP,
+    );
 
-    const xOf = (s) => s * dxSub - SCENE_W / 2;
-
-    // Colored fill meshes (3D visual, one per contiguous gap span)
-    const emitFillSpan = (start, end) => {
-      if (end - start < 1) return;
-      const sh = new THREE.Shape();
-      sh.moveTo(xOf(start), yF[start]);
-      for (let s = start; s <= end; s++) sh.lineTo(xOf(s), yF[s]);
-      for (let s = end; s >= start; s--) sh.lineTo(xOf(s), yB[s]);
-      sh.closePath();
-      const shGeo = new THREE.ShapeGeometry(sh);
+    if (positions.length) {
+      const shGeo = new THREE.BufferGeometry();
+      shGeo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
       const shMat = new THREE.MeshBasicMaterial({
         color,
         transparent:         true,
         opacity:             0.4,
+        depthWrite:          false,
         polygonOffset:       true,
-        polygonOffsetFactor: -1,
-        polygonOffsetUnits:  -1,
+        polygonOffsetFactor: 1,
+        polygonOffsetUnits:  1,
         side:                THREE.DoubleSide,
       });
       const m = new THREE.Mesh(shGeo, shMat);
-      m.position.z = z;
       waveLines.push(m);
       scene.add(m);
-    };
-
-    let inSpan = false, spanStart = 0;
-    for (let s = 0; s < SUB; s++) {
-      const hasGap = yB[s] > yF[s];
-      if (hasGap && !inSpan)  { inSpan = true; spanStart = s; }
-      else if (!hasGap && inSpan) { emitFillSpan(spanStart, s - 1); inSpan = false; }
-    }
-    if (inSpan) emitFillSpan(spanStart, SUB - 1);
-
-    // Hatch lines (exported to G-code)
-    let yMin = Infinity, yMax = -Infinity;
-    for (let s = 0; s < SUB; s++) {
-      if (yF[s] < yMin) yMin = yF[s];
-      if (yB[s] > yMax) yMax = yB[s];
     }
 
-    const emitHatch = (x1, x2, y_h) => {
-      if (x2 <= x1) return;
-      const hPos = new Float32Array([x1, y_h, z, x2, y_h, z]);
+    for (const hatch of hatches) {
       const hGeo = new THREE.BufferGeometry();
-      hGeo.setAttribute('position', new THREE.BufferAttribute(hPos, 3));
+      hGeo.setAttribute('position', new THREE.Float32BufferAttribute(hatch, 3));
       const hMat = new THREE.LineBasicMaterial({
         color: new THREE.Color(PALETTE[k]),
         transparent: true,
         opacity:     0.5,
+        depthWrite:  false,
       });
       const hLine = new THREE.Line(hGeo, hMat);
       hLine.userData.isHatch = true;
       waveLines.push(hLine);
       scene.add(hLine);
-    };
-
-    for (let y_h = yMin; y_h <= yMax + 1e-6; y_h += HATCH_STEP) {
-      let inHatch = false, hatchX0 = 0;
-      for (let s = 0; s < SUB; s++) {
-        const inGap = y_h >= yF[s] && y_h <= yB[s];
-        if (inGap && !inHatch)  { inHatch = true; hatchX0 = xOf(s); }
-        else if (!inGap && inHatch) { emitHatch(hatchX0, xOf(s - 1), y_h); inHatch = false; }
-      }
-      if (inHatch) emitHatch(hatchX0, xOf(SUB - 1), y_h);
     }
   }
 }
